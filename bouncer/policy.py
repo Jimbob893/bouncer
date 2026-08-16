@@ -1,0 +1,367 @@
+"""The declarative policy schema.
+
+Threat model: this module decides what a policy *means*, so its defaults are
+chosen to fail closed.
+
+- Every model sets ``extra="forbid"``. A typo'd rule name is a loud error, not
+  a silently-absent restriction. Accepting unknown keys would mean
+  ``per_transaciton_cap: 5`` reads as "no cap at all".
+- ``per_transaction_cap`` is mandatory on every rule set. There is no way to
+  express "this agent may spend without a ceiling".
+- An agent absent from ``agents`` is denied. Access is granted by naming, and
+  the catch-all key ``"*"`` must be written explicitly to exist.
+"""
+
+from __future__ import annotations
+
+import fnmatch
+import re
+from datetime import datetime, time, timedelta
+from decimal import Decimal
+from enum import Enum
+from pathlib import Path
+from typing import Self
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+import yaml
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
+
+from .canonical import sha256_hex
+from .errors import PolicyError
+from .models import Money, _to_decimal
+
+__all__ = [
+    "ApprovalRule",
+    "CategoryRules",
+    "MerchantRules",
+    "Policy",
+    "RollingWindow",
+    "RuleSet",
+    "TimeWindow",
+    "Weekday",
+    "WILDCARD_AGENT",
+    "parse_duration",
+]
+
+#: The explicit catch-all agent key. Must be written to take effect.
+WILDCARD_AGENT = "*"
+
+_DURATION_RE = re.compile(r"^\s*(\d+)\s*([smhdw])\s*$", re.IGNORECASE)
+_DURATION_UNITS: dict[str, timedelta] = {
+    "s": timedelta(seconds=1),
+    "m": timedelta(minutes=1),
+    "h": timedelta(hours=1),
+    "d": timedelta(days=1),
+    "w": timedelta(weeks=1),
+}
+
+
+def parse_duration(text: str) -> timedelta:
+    """Parse a compact duration such as ``30d``, ``24h``, ``90m``."""
+    match = _DURATION_RE.match(text)
+    if match is None:
+        raise ValueError(
+            f"invalid duration {text!r}; expected a form like '30d', '24h', '90m'"
+        )
+    count = int(match.group(1))
+    if count <= 0:
+        raise ValueError(f"duration must be positive: {text!r}")
+    return _DURATION_UNITS[match.group(2).lower()] * count
+
+
+class _Strict(BaseModel):
+    """Base for policy models: immutable and intolerant of unknown keys."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+
+class Weekday(str, Enum):
+    MON = "mon"
+    TUE = "tue"
+    WED = "wed"
+    THU = "thu"
+    FRI = "fri"
+    SAT = "sat"
+    SUN = "sun"
+
+    @property
+    def index(self) -> int:
+        """Match ``datetime.weekday()``, where Monday is 0."""
+        return list(Weekday).index(self)
+
+
+class RollingWindow(_Strict):
+    """A ceiling on total spend across a trailing time window."""
+
+    amount: Money
+    window: str
+
+    _coerce_amount = field_validator("amount", mode="before")(_to_decimal)
+
+    @field_validator("window")
+    @classmethod
+    def _check_window(cls, value: str) -> str:
+        parse_duration(value)  # raises on malformed input
+        return value.strip().lower()
+
+    @property
+    def duration(self) -> timedelta:
+        return parse_duration(self.window)
+
+
+class MerchantRules(_Strict):
+    """Merchant allowlist and denylist.
+
+    Patterns are shell-style globs matched case-insensitively, so
+    ``*.example.com`` covers subdomains. ``deny`` always beats ``allow``.
+
+    If ``allow`` is ``None`` the allowlist is not enforced and any merchant not
+    on the denylist passes the merchant check. If ``allow`` is present, a
+    merchant must match it. An empty list therefore means "no merchant is
+    permitted", which is a usable way to freeze an agent.
+    """
+
+    allow: list[str] | None = None
+    deny: list[str] = Field(default_factory=list)
+
+    @field_validator("allow", "deny")
+    @classmethod
+    def _normalize(cls, value: list[str] | None) -> list[str] | None:
+        if value is None:
+            return None
+        return [item.strip().lower().rstrip(".") for item in value]
+
+    def denied_by(self, merchant: str) -> str | None:
+        """Return the denylist pattern matching ``merchant``, if any."""
+        return _first_match(merchant, self.deny)
+
+    def allowed_by(self, merchant: str) -> str | None:
+        """Return the allowlist pattern matching ``merchant``, if any."""
+        return _first_match(merchant, self.allow or [])
+
+
+class CategoryRules(_Strict):
+    """Category allowlist and denylist, with the same precedence as merchants.
+
+    An intent with no category is denied whenever ``allow`` is present: an
+    uncategorized request cannot be shown to satisfy a categorical restriction.
+    """
+
+    allow: list[str] | None = None
+    deny: list[str] = Field(default_factory=list)
+
+    @field_validator("allow", "deny")
+    @classmethod
+    def _normalize(cls, value: list[str] | None) -> list[str] | None:
+        if value is None:
+            return None
+        return [item.strip().lower() for item in value]
+
+    def denied_by(self, category: str) -> str | None:
+        return _first_match(category, self.deny)
+
+    def allowed_by(self, category: str) -> str | None:
+        return _first_match(category, self.allow or [])
+
+
+def _first_match(value: str, patterns: list[str]) -> str | None:
+    for pattern in patterns:
+        if fnmatch.fnmatchcase(value, pattern):
+            return pattern
+    return None
+
+
+class TimeWindow(_Strict):
+    """An interval during which spending is permitted.
+
+    A window whose ``end`` is not after its ``start`` wraps past midnight, so
+    ``22:00``-``02:00`` is a valid overnight window.
+    """
+
+    days: list[Weekday] | None = None
+    start: time
+    end: time
+    timezone: str = "UTC"
+
+    @field_validator("timezone")
+    @classmethod
+    def _check_timezone(cls, value: str) -> str:
+        try:
+            ZoneInfo(value)
+        except (ZoneInfoNotFoundError, ValueError) as exc:
+            raise ValueError(f"unknown timezone {value!r}") from exc
+        return value
+
+    @field_validator("start", "end")
+    @classmethod
+    def _drop_subminute(cls, value: time) -> time:
+        if value.tzinfo is not None:
+            raise ValueError("time window bounds must not carry a timezone offset")
+        return value
+
+    def contains(self, moment: datetime) -> bool:
+        """Is ``moment`` (timezone-aware) inside this window?"""
+        local = moment.astimezone(ZoneInfo(self.timezone))
+        if self.days is not None and local.weekday() not in {d.index for d in self.days}:
+            return False
+        current = local.time()
+        if self.start <= self.end:
+            return self.start <= current <= self.end
+        # Wrapping window, e.g. 22:00 -> 02:00.
+        return current >= self.start or current <= self.end
+
+
+class ApprovalRule(_Strict):
+    """Above ``amount``, a human holding ``approver_role`` must sign off."""
+
+    amount: Money
+    approver_role: str = Field(min_length=1, max_length=64)
+
+    _coerce_amount = field_validator("amount", mode="before")(_to_decimal)
+
+    @field_validator("approver_role")
+    @classmethod
+    def _normalize_role(cls, value: str) -> str:
+        role = value.strip().lower()
+        if not role:
+            raise ValueError("approver_role must not be blank")
+        return role
+
+
+class RuleSet(_Strict):
+    """The complete set of restrictions applied to one agent."""
+
+    per_transaction_cap: Money
+    rolling_windows: list[RollingWindow] = Field(default_factory=list)
+    merchants: MerchantRules = Field(default_factory=MerchantRules)
+    categories: CategoryRules = Field(default_factory=CategoryRules)
+    time_windows: list[TimeWindow] = Field(default_factory=list)
+    approval_required_above: ApprovalRule | None = None
+
+    _coerce_cap = field_validator("per_transaction_cap", mode="before")(_to_decimal)
+
+    @model_validator(mode="after")
+    def _check_threshold_below_cap(self) -> Self:
+        """An approval threshold above the hard cap can never fire.
+
+        That is almost always a typo, and a policy that silently contains an
+        unreachable approval step reads as safer than it is.
+        """
+        rule = self.approval_required_above
+        if rule is not None and rule.amount >= self.per_transaction_cap:
+            raise ValueError(
+                f"approval_required_above.amount ({rule.amount}) is not below "
+                f"per_transaction_cap ({self.per_transaction_cap}), so approval "
+                "could never be requested; lower the threshold or raise the cap"
+            )
+        return self
+
+
+class Policy(_Strict):
+    """A complete, validated policy document."""
+
+    version: int = Field(default=1, ge=1, le=1)
+    currency: str = Field(default="USD", min_length=3, max_length=3)
+    agents: dict[str, RuleSet] = Field(min_length=1)
+
+    @field_validator("currency")
+    @classmethod
+    def _normalize_currency(cls, value: str) -> str:
+        currency = value.strip().upper()
+        if not currency.isalpha():
+            raise ValueError("currency must be alphabetic (ISO 4217)")
+        return currency
+
+    @field_validator("agents")
+    @classmethod
+    def _normalize_agents(cls, value: dict[str, RuleSet]) -> dict[str, RuleSet]:
+        out: dict[str, RuleSet] = {}
+        for key, rules in value.items():
+            agent = key.strip()
+            if not agent:
+                raise ValueError("agent id must not be blank")
+            out[agent] = rules
+        return out
+
+    def rules_for(self, agent_id: str) -> tuple[str, RuleSet] | None:
+        """Resolve the rule set governing ``agent_id``.
+
+        Exact identity wins over the ``"*"`` catch-all. Returns the matched key
+        alongside the rules so decisions can name the exact rule that fired.
+        """
+        if agent_id in self.agents:
+            return agent_id, self.agents[agent_id]
+        if WILDCARD_AGENT in self.agents:
+            return WILDCARD_AGENT, self.agents[WILDCARD_AGENT]
+        return None
+
+    @property
+    def policy_hash(self) -> str:
+        """SHA-256 over the canonical form, recorded with every decision.
+
+        This is what lets an auditor prove which policy text produced a given
+        verdict, even if the file has since been edited.
+        """
+        return sha256_hex(self.model_dump(mode="python"))
+
+    @classmethod
+    def from_yaml(cls, text: str) -> Policy:
+        """Parse and validate a YAML policy document.
+
+        Raises :class:`PolicyError` on anything malformed. Callers that must not
+        raise should use a :class:`~bouncer.sources.PolicySource`, which turns
+        failures into an explicit deny.
+        """
+        try:
+            raw = yaml.load(text, Loader=_DecimalSafeLoader)
+        except yaml.YAMLError as exc:
+            raise PolicyError(f"policy is not valid YAML: {exc}") from exc
+        if raw is None:
+            raise PolicyError("policy file is empty; an empty policy denies everything")
+        if not isinstance(raw, dict):
+            raise PolicyError(
+                f"policy must be a mapping at the top level, got {type(raw).__name__}"
+            )
+        try:
+            return cls.model_validate(raw)
+        except ValidationError as exc:
+            raise PolicyError(f"policy failed validation:\n{exc}") from exc
+
+
+class _DecimalSafeLoader(yaml.SafeLoader):
+    """A YAML loader that produces ``Decimal`` instead of ``float``.
+
+    Threat model: ``per_transaction_cap: 100.10`` loaded as a binary float is
+    not 100.10, and a cap that is a hair above or below the number the operator
+    wrote is a policy the operator did not author. Parsing straight to Decimal
+    keeps the written value exact.
+    """
+
+
+def _construct_decimal(loader: yaml.SafeLoader, node: yaml.Node) -> Decimal:
+    value = loader.construct_scalar(node)  # type: ignore[arg-type]
+    try:
+        parsed = Decimal(str(value))
+    except ArithmeticError as exc:
+        raise yaml.constructor.ConstructorError(
+            None, None, f"invalid decimal value {value!r}", node.start_mark
+        ) from exc
+    if not parsed.is_finite():
+        raise yaml.constructor.ConstructorError(
+            None, None, f"non-finite number {value!r} is not allowed in a policy",
+            node.start_mark,
+        )
+    return parsed
+
+
+_DecimalSafeLoader.add_constructor("tag:yaml.org,2002:float", _construct_decimal)
+
+
+def load_policy_file(path: str | Path) -> Policy:
+    """Read and validate a policy from disk. Raises :class:`PolicyError`."""
+    file_path = Path(path)
+    try:
+        text = file_path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise PolicyError(f"cannot read policy at {file_path}: {exc}") from exc
+    return Policy.from_yaml(text)
