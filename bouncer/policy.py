@@ -261,15 +261,20 @@ class Policy(_Strict):
     """A complete, validated policy document."""
 
     version: int = Field(default=1, ge=1, le=1)
-    currency: str = Field(default="USD", min_length=3, max_length=3)
+    currency: str = Field(default="USD", min_length=3, max_length=12)
     agents: dict[str, RuleSet] = Field(min_length=1)
 
     @field_validator("currency")
     @classmethod
     def _normalize_currency(cls, value: str) -> str:
+        """An ISO 4217 code (USD) or a token symbol for crypto rails (USDC).
+
+        A request in any other currency is denied outright rather than
+        converted; see PaymentIntent.currency.
+        """
         currency = value.strip().upper()
-        if not currency.isalpha():
-            raise ValueError("currency must be alphabetic (ISO 4217)")
+        if not currency.isalnum():
+            raise ValueError("currency must be alphanumeric (ISO 4217 code or token symbol)")
         return currency
 
     @field_validator("agents")

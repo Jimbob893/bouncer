@@ -108,7 +108,7 @@ class PaymentIntent(BaseModel):
     agent_id: str = Field(min_length=1, max_length=128)
     merchant: str = Field(min_length=1, max_length=253)
     amount: Money
-    currency: str = Field(min_length=3, max_length=3)
+    currency: str = Field(min_length=3, max_length=12)
     category: str | None = Field(default=None, max_length=64)
     description: str | None = Field(default=None, max_length=512)
     rail: str = Field(default="generic", min_length=1, max_length=32)
@@ -129,9 +129,16 @@ class PaymentIntent(BaseModel):
     @field_validator("currency")
     @classmethod
     def _normalize_currency(cls, value: str) -> str:
+        """An ISO 4217 code (USD) or a token symbol for crypto rails (USDC).
+
+        Symbols are compared to the policy's currency verbatim. bouncer never
+        treats two different symbols as equivalent — not even USDC and USD —
+        because deciding they are worth the same requires a live exchange rate,
+        and the engine is not allowed to consult one.
+        """
         currency = value.strip().upper()
-        if not currency.isalpha():
-            raise ValueError("currency must be alphabetic (ISO 4217)")
+        if not currency.isalnum():
+            raise ValueError("currency must be alphanumeric (ISO 4217 code or token symbol)")
         return currency
 
     @field_validator("category")
