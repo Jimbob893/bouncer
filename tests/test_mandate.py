@@ -7,6 +7,7 @@ import json
 from datetime import timedelta
 from decimal import Decimal
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -19,6 +20,7 @@ from bouncer.errors import (
 )
 from bouncer.keys import OperatorKey
 from bouncer.mandate import (
+    MandateClaims,
     DEFAULT_TTL,
     NonceStore,
     decode_unverified,
@@ -36,10 +38,8 @@ def nonces(tmp_path: Path) -> NonceStore:
     return NonceStore(tmp_path / "nonces.db")
 
 
-def mint(key: OperatorKey, **overrides: object) -> tuple[str, object]:
-    return issue_mandate(
-        intent(**overrides), key, policy_hash=POLICY_HASH, now=NOW
-    )
+def mint(key: OperatorKey, **overrides: Any) -> tuple[str, MandateClaims]:
+    return issue_mandate(intent(**overrides), key, policy_hash=POLICY_HASH, now=NOW)
 
 
 # ---------------------------------------------------------------------------
@@ -223,7 +223,7 @@ def test_replayed_nonce_is_rejected(operator_key: OperatorKey, nonces: NonceStor
 
 
 def test_each_mandate_gets_a_distinct_nonce(operator_key: OperatorKey) -> None:
-    nonce_values = {mint(operator_key)[1].nonce for _ in range(50)}  # type: ignore[union-attr]
+    nonce_values = {mint(operator_key)[1].nonce for _ in range(50)}
     assert len(nonce_values) == 50
 
 
@@ -242,7 +242,7 @@ def test_inspection_without_consuming_leaves_the_nonce_unspent(
 ) -> None:
     token, claims = mint(operator_key)
     verify_mandate(token, operator_key, now=NOW, nonce_store=nonces, consume=False)
-    assert not nonces.seen(claims.nonce)  # type: ignore[union-attr]
+    assert not nonces.seen(claims.nonce)
     assert verify_mandate(token, operator_key, now=NOW, nonce_store=nonces)
 
 

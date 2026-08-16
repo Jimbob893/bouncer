@@ -72,6 +72,7 @@ def build_enforcer(config: BouncerConfig) -> Enforcer:
     """Wire up an enforcer from on-disk state."""
     config.ensure_home()
     assert config.key_path is not None and config.db_path is not None
+    assert config.policy_path is not None
     key = OperatorKey.load_or_generate(config.key_path)
     audit = AuditLog(config.db_path, key)
     # All three share one engine, so they share one SQLite file and one write
@@ -189,7 +190,7 @@ def create_app(config: BouncerConfig | None = None, *, enforcer: Enforcer | None
             placeholder = PaymentIntent(
                 agent_id=ctx.agent_id or "unknown",
                 merchant=ctx.host or "unknown",
-                amount=0,
+                amount=Decimal(0),
                 currency="XXX",
                 rail="unparsed",
                 description=f"{ctx.method} {ctx.url}"[:512] or None,

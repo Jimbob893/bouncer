@@ -63,7 +63,8 @@ class X402Adapter:
         if not isinstance(offer, dict):
             raise UnparseableIntent("'accepts' entry must be an object")
 
-        extra = offer.get("extra") if isinstance(offer.get("extra"), dict) else {}
+        raw_extra = offer.get("extra")
+        extra: dict[str, Any] = raw_extra if isinstance(raw_extra, dict) else {}
         symbol = str(extra.get("name") or offer.get("asset") or "").strip().upper()
         if not symbol:
             raise UnparseableIntent("402 challenge does not name the asset")

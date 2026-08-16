@@ -17,11 +17,11 @@ import urllib.error
 import urllib.request
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 from typing import Any
 
 from .approvals import ApprovalQueue, ApprovalStatus, PendingView, to_webhook_payload
 from .audit import AuditLog
-from .canonical import utc_iso
 from .engine import evaluate, evaluate_tunnel
 from .errors import UnparseableIntent
 from .keys import OperatorKey
@@ -172,7 +172,7 @@ class Enforcer:
         placeholder = PaymentIntent(
             agent_id=agent_id,
             merchant=host,
-            amount=0,
+            amount=Decimal(0),
             currency="XXX",
             rail="connect",
             description=f"CONNECT {host}",

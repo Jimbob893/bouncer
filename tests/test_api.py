@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from decimal import Decimal
 from pathlib import Path
-from typing import Iterator
+from typing import Any, Iterator
 
 import pytest
 from fastapi.testclient import TestClient
@@ -56,8 +56,12 @@ def client(enforcer: Enforcer) -> Iterator[TestClient]:
         yield test_client
 
 
-def authorize(client: TestClient, **payload: object) -> tuple[int, dict]:
-    body = {"agent_id": "research-bot", "merchant": "api.example.com", "currency": "USD"}
+def authorize(client: TestClient, **payload: object) -> tuple[int, dict[str, Any]]:
+    body: dict[str, object] = {
+        "agent_id": "research-bot",
+        "merchant": "api.example.com",
+        "currency": "USD",
+    }
     body.update(payload)
     response = client.post("/authorize", json=body)
     return response.status_code, response.json()

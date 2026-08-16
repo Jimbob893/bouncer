@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
@@ -66,20 +67,34 @@ agents:
 
 
 def _config(args: argparse.Namespace) -> BouncerConfig:
-    base = BouncerConfig.from_env()
+    """Resolve config from flags, then environment, then defaults.
+
+    Sub-paths are only carried over when they were set *explicitly* — by flag or
+    by environment variable. Inheriting them from an already-resolved config
+    would pin them to the default home and silently ignore ``--home``.
+    """
+    env = BouncerConfig.from_env()
+
+    def pick(flag: Path | None, variable: str) -> Path | None:
+        if flag is not None:
+            return flag
+        raw = os.environ.get(variable)
+        return Path(raw).expanduser() if raw else None
+
     return BouncerConfig(
-        home=args.home or base.home,
-        policy_path=args.policy or base.policy_path,
-        db_path=args.db or base.db_path,
-        key_path=args.key or base.key_path,
-        approval_timeout=base.approval_timeout,
-        webhook_url=base.webhook_url,
+        home=args.home or env.home,
+        policy_path=pick(args.policy, "BOUNCER_POLICY"),
+        db_path=pick(args.db, "BOUNCER_DB"),
+        key_path=pick(args.key, "BOUNCER_KEY"),
+        approval_timeout=env.approval_timeout,
+        webhook_url=env.webhook_url,
     )
 
 
 def _enforcer(config: BouncerConfig) -> Enforcer:
     config.ensure_home()
     assert config.key_path is not None and config.db_path is not None
+    assert config.policy_path is not None
     key = OperatorKey.load(config.key_path)
     audit = AuditLog(config.db_path, key)
     return Enforcer(
@@ -175,19 +190,18 @@ def cmd_policy(args: argparse.Namespace, out: TextIO) -> int:
     for name, rules in policy.agents.items():
         out.write(f"\nagent {name!r}\n")
         out.write(f"  per-transaction cap: {rules.per_transaction_cap}\n")
-        for window in rules.rolling_windows:
-            out.write(f"  rolling ceiling: {window.amount} per {window.window}\n")
+        for rolling in rules.rolling_windows:
+            out.write(f"  rolling ceiling: {rolling.amount} per {rolling.window}\n")
         if rules.merchants.allow is not None:
             out.write(f"  merchants allowed: {', '.join(rules.merchants.allow) or '(none)'}\n")
         if rules.merchants.deny:
             out.write(f"  merchants denied: {', '.join(rules.merchants.deny)}\n")
-        if rules.time_windows:
-            for window in rules.time_windows:
-                days = ",".join(d.value for d in window.days) if window.days else "all days"
-                out.write(
-                    f"  spending window: {window.start}-{window.end} "
-                    f"{window.timezone} ({days})\n"
-                )
+        for schedule in rules.time_windows:
+            days = ",".join(d.value for d in schedule.days) if schedule.days else "all days"
+            out.write(
+                f"  spending window: {schedule.start}-{schedule.end} "
+                f"{schedule.timezone} ({days})\n"
+            )
         if rules.approval_required_above is not None:
             approval = rules.approval_required_above
             out.write(

@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from decimal import Decimal
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
@@ -265,7 +266,7 @@ class ProxyServer:
             placeholder = PaymentIntent(
                 agent_id=agent_id,
                 merchant=ctx.host or "unknown",
-                amount=0,
+                amount=Decimal(0),
                 currency="XXX",
                 rail="unparsed",
                 description=f"{method} {target}"[:512],

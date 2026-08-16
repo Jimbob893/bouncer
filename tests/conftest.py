@@ -56,3 +56,17 @@ agents:
 @pytest.fixture()
 def operator_key(tmp_path: Any) -> OperatorKey:
     return OperatorKey.generate(tmp_path / "operator.pem")
+
+
+@pytest.fixture(autouse=True)
+def isolate_from_real_bouncer_home(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Never let a test read or write the developer's real ~/.bouncer state."""
+    for variable in (
+        "BOUNCER_HOME",
+        "BOUNCER_POLICY",
+        "BOUNCER_DB",
+        "BOUNCER_KEY",
+        "BOUNCER_WEBHOOK_URL",
+        "BOUNCER_APPROVAL_TIMEOUT",
+    ):
+        monkeypatch.delenv(variable, raising=False)

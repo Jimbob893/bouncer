@@ -1,0 +1,42 @@
+# The policy used by examples/demo.py.
+#
+# Everything here is deny-by-default: an agent that is not named below cannot
+# spend at all, and a rule name that is misspelled is a load error rather than
+# a silently missing restriction.
+version: 1
+currency: USD
+
+agents:
+  # A research agent on a short leash: small purchases, known vendors only.
+  research-bot:
+    per_transaction_cap: 50.00
+
+    rolling_windows:
+      - amount: 100.00
+        window: 30d
+
+    merchants:
+      allow:
+        - "api.weather.example"
+        - "api.data-vendor.example"
+        - "*.trusted-vendor.example"
+      deny:
+        - "*.casino.example"
+
+    categories:
+      deny: ["gambling", "crypto_trading"]
+
+    # Anything above $20 needs a human from finance to sign off.
+    approval_required_above:
+      amount: 20.00
+      approver_role: finance
+
+  # A procurement agent with a larger budget and a different approver.
+  procurement-bot:
+    per_transaction_cap: 10000.00
+    rolling_windows:
+      - amount: 25000.00
+        window: 30d
+    approval_required_above:
+      amount: 2500.00
+      approver_role: cfo

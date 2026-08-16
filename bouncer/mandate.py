@@ -34,10 +34,10 @@ import threading
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
-from sqlalchemy import Engine, String, delete, select
+from sqlalchemy import CursorResult, Engine, String, delete, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -310,8 +310,11 @@ class NonceStore:
     def purge_expired(self, *, now: datetime) -> int:
         """Delete nonces whose mandates have expired. Returns rows removed."""
         with self._lock, self._sessions.begin() as session:
-            result = session.execute(
-                delete(UsedNonce).where(UsedNonce.expires_at <= utc_iso(now))
+            result = cast(
+                CursorResult[Any],
+                session.execute(
+                    delete(UsedNonce).where(UsedNonce.expires_at <= utc_iso(now))
+                ),
             )
             return int(result.rowcount or 0)
 

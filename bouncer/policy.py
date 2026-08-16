@@ -85,8 +85,12 @@ class Weekday(str, Enum):
     SUN = "sun"
 
     @property
-    def index(self) -> int:
-        """Match ``datetime.weekday()``, where Monday is 0."""
+    def weekday_number(self) -> int:
+        """Match ``datetime.weekday()``, where Monday is 0.
+
+        Not named ``index``: Weekday subclasses ``str``, and shadowing
+        ``str.index`` with an incompatible signature is a trap.
+        """
         return list(Weekday).index(self)
 
 
@@ -202,7 +206,9 @@ class TimeWindow(_Strict):
     def contains(self, moment: datetime) -> bool:
         """Is ``moment`` (timezone-aware) inside this window?"""
         local = moment.astimezone(ZoneInfo(self.timezone))
-        if self.days is not None and local.weekday() not in {d.index for d in self.days}:
+        if self.days is not None and local.weekday() not in {
+            day.weekday_number for day in self.days
+        }:
             return False
         current = local.time()
         if self.start <= self.end:

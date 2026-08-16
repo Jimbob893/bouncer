@@ -68,7 +68,7 @@ def test_generic_rejects_a_non_numeric_amount() -> None:
 
 
 def x402_body(**overrides: object) -> bytes:
-    offer = {
+    offer: dict[str, object] = {
         "scheme": "exact",
         "network": "base-sepolia",
         "maxAmountRequired": "10000",
