@@ -38,6 +38,18 @@ chain itself.
 who can move the clock backwards can revive expired mandates. Fixing this means
 a trusted time source, which conflicts with the no-network constraint.
 
+**x402 payment requests carry no asset scale.** The `X-PAYMENT` header an agent
+sends after a 402 gives an amount in atomic units but names no decimals, so the
+proxy cannot price it and denies it. Resolving this needs an asset registry
+mapping contract addresses to decimals — a lookup table that has to be kept
+current, which is why it is not in v1. The `/authorize` path is unaffected: a
+402 challenge states its own scale.
+
+**Decision throughput.** Read-history / decide / record runs under one process
+lock so concurrent requests cannot each spend the same budget. That makes
+authorization serial. It is the right trade for a local single-operator tool,
+but it is a ceiling, and a per-agent lock would lift it if it ever mattered.
+
 ## Wanted, not yet built
 
 - **More rails.** ACP, AP2, UCP and Visa TAP adapters, once any of them has

@@ -281,3 +281,16 @@ def test_missing_key_is_a_clean_error_not_a_traceback(home: Path) -> None:
     )
     assert code == EXIT_ERROR
     assert "bouncer keygen" in output
+
+
+def test_purge_removes_expired_nonces_only(home: Path) -> None:
+    """Housekeeping must never touch the append-only audit log."""
+    bootstrap(home)
+    run(home, "check", "--agent", "research-bot", "--merchant", "a.example.com",
+        "--amount", "1.00")
+
+    code, output = run(home, "purge")
+    assert code == EXIT_OK
+    assert "audit log is append-only and was not modified" in output
+    assert run(home, "verify")[0] == EXIT_OK
+    assert "1 entries verified" in run(home, "verify")[1]

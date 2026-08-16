@@ -291,6 +291,26 @@ def cmd_export(args: argparse.Namespace, out: TextIO) -> int:
     return EXIT_OK
 
 
+def cmd_purge(args: argparse.Namespace, out: TextIO) -> int:
+    """Drop spent nonces whose mandates have expired.
+
+    Safe by construction: an expired mandate is already rejected on the expiry
+    check, so forgetting that it was spent cannot enable a replay. The audit log
+    is append-only and is never touched by this command.
+    """
+    config = _config(args)
+    config.ensure_home()
+    assert config.db_path is not None
+    store = NonceStore(config.db_path)
+    before = store.count()
+    removed = store.purge_expired(now=datetime.now(timezone.utc))
+    out.write(
+        f"purged {removed} expired nonce(s); {before - removed} still live\n"
+        "the audit log is append-only and was not modified\n"
+    )
+    return EXIT_OK
+
+
 def cmd_pending(args: argparse.Namespace, out: TextIO) -> int:
     config = _config(args)
     config.ensure_home()
@@ -450,6 +470,11 @@ def build_parser() -> argparse.ArgumentParser:
     export = subparsers.add_parser("export", help="export the audit log as JSONL")
     export.add_argument("-o", "--output", help="write here instead of stdout")
     export.set_defaults(handler=cmd_export)
+
+    purge = subparsers.add_parser(
+        "purge", help="drop spent nonces for mandates that have expired"
+    )
+    purge.set_defaults(handler=cmd_purge)
 
     pending = subparsers.add_parser("pending", help="list approvals awaiting a human")
     pending.add_argument("--role", help="only show items requiring this role")

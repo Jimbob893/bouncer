@@ -37,7 +37,7 @@ from pathlib import Path
 from typing import Any, cast
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
-from sqlalchemy import CursorResult, Engine, String, delete, select
+from sqlalchemy import CursorResult, Engine, String, delete, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -320,7 +320,10 @@ class NonceStore:
 
     def count(self) -> int:
         with self._sessions() as session:
-            return len(session.execute(select(UsedNonce.nonce)).scalars().all())
+            total = session.execute(
+                select(func.count()).select_from(UsedNonce)
+            ).scalar_one()
+            return int(total)
 
 
 def decode_unverified(token: str) -> dict[str, Any]:

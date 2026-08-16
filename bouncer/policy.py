@@ -246,6 +246,17 @@ class RuleSet(_Strict):
 
     _coerce_cap = field_validator("per_transaction_cap", mode="before")(_to_decimal)
 
+    @property
+    def longest_window(self) -> timedelta | None:
+        """The longest rolling window declared, or None if there are none.
+
+        Callers use this to decide how far back spend history must reach. A
+        horizon shorter than this would under-count spend and fail open.
+        """
+        if not self.rolling_windows:
+            return None
+        return max(window.duration for window in self.rolling_windows)
+
     @model_validator(mode="after")
     def _check_threshold_below_cap(self) -> Self:
         """An approval threshold above the hard cap can never fire.

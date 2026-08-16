@@ -27,13 +27,9 @@ from .errors import UnparseableIntent
 from .keys import OperatorKey
 from .mandate import DEFAULT_TTL, NonceStore, issue_mandate
 from .models import Decision, Outcome, PaymentIntent, ReasonCode
-from .sources import PolicySource
+from .sources import LoadedPolicy, PolicySource
 
 __all__ = ["AuthorizationResult", "Enforcer"]
-
-#: How far back to pull spend history. Must exceed the longest rolling window a
-#: policy can express; over-fetching is harmless because the engine filters.
-_HISTORY_LOOKBACK = timedelta(days=400)
 
 #: Poll interval while a request waits on a human.
 _APPROVAL_POLL_SECONDS = 0.25
@@ -88,6 +84,9 @@ class Enforcer:
         self.approval_timeout = approval_timeout
         self.webhook_url = webhook_url
         self._clock = clock if clock is not None else (lambda: datetime.now(timezone.utc))
+        # Serializes the read-history / decide / record sequence. Lock ordering
+        # across the codebase is always: decision -> approvals -> audit.
+        self._decision_lock = threading.RLock()
 
     def now(self) -> datetime:
         moment: datetime = self._clock()
@@ -97,6 +96,23 @@ class Enforcer:
 
     # -- the main path ----------------------------------------------------
 
+    def _lookback_for(self, loaded: LoadedPolicy, agent_id: str) -> timedelta:
+        """How far back spend history must reach for this agent.
+
+        Threat model: this is derived from the policy's own longest rolling
+        window, never from a fixed constant. A hardcoded horizon shorter than a
+        declared window would silently drop older spend from the total, and an
+        agent that had already exhausted its budget would be waved through — a
+        fail-*open*, which is the one failure mode bouncer must not have.
+        """
+        if loaded.policy is None:
+            return timedelta(0)
+        match = loaded.policy.rules_for(agent_id)
+        if match is None:
+            return timedelta(0)
+        longest = match[1].longest_window
+        return longest if longest is not None else timedelta(0)
+
     def authorize(
         self, intent: PaymentIntent, *, record: bool = True
     ) -> AuthorizationResult:
@@ -104,34 +120,53 @@ class Enforcer:
 
         Approval-requiring decisions are parked in the queue and returned
         immediately; use :meth:`authorize_blocking` to wait for a human.
+
+        Args:
+            record: When False, nothing is written and no mandate is minted —
+                the decision is returned for inspection only. See below.
+
+        Threat model: reading spend history, deciding, and recording the result
+        happen under one lock. Without it, two concurrent requests would each
+        read the same "already spent" total and each be judged against a budget
+        the other was about to consume — two $60 charges would both pass a $100
+        ceiling. The lock makes the check and the commit one step.
         """
-        moment = self.now()
-        loaded = self.source.load()
+        with self._decision_lock:
+            moment = self.now()
+            loaded = self.source.load()
 
-        history = self.audit.spend_history(
-            intent.agent_id, since=moment - _HISTORY_LOOKBACK
-        )
-        decision = evaluate(intent, loaded, history, now=moment)
-
-        mandate: str | None = None
-        pending_id: str | None = None
-
-        if decision.outcome is Outcome.ALLOW:
-            mandate, _ = issue_mandate(
-                intent,
-                self.key,
-                policy_hash=decision.policy_hash,
-                now=moment,
-                ttl=self.mandate_ttl,
+            history = self.audit.spend_history(
+                intent.agent_id, since=moment - self._lookback_for(loaded, intent.agent_id)
             )
-        elif decision.outcome is Outcome.REQUIRE_APPROVAL:
-            item = self.approvals.enqueue(intent, decision)
-            pending_id = item.id
-            self._fire_webhook(item)
+            decision = evaluate(intent, loaded, history, now=moment)
 
-        seq = None
-        if record:
+            mandate: str | None = None
+            pending_id: str | None = None
+
+            if not record:
+                # A mandate is spending authority. Minting one without writing
+                # the matching audit row would hand out authority that leaves no
+                # trace and does not count against any ceiling, so a dry run
+                # returns the verdict and nothing else.
+                return AuthorizationResult(decision=decision, intent=intent)
+
+            if decision.outcome is Outcome.ALLOW:
+                mandate, _ = issue_mandate(
+                    intent,
+                    self.key,
+                    policy_hash=decision.policy_hash,
+                    now=moment,
+                    ttl=self.mandate_ttl,
+                )
+            elif decision.outcome is Outcome.REQUIRE_APPROVAL:
+                item = self.approvals.enqueue(intent, decision)
+                pending_id = item.id
+
             seq = self.audit.append(intent, decision).seq
+
+        # Fired outside the lock: a webhook must never hold up a decision.
+        if pending_id is not None:
+            self._fire_webhook(self.approvals.get(pending_id))
 
         return AuthorizationResult(
             decision=decision,
@@ -190,14 +225,40 @@ class Enforcer:
         The queued item's original decision is superseded by a new one recorded
         here, so the audit log shows both the request for approval and its
         answer. Only an approval mints a mandate.
+
+        Held under the same lock as :meth:`authorize`, because granting an
+        approval commits spend and must not interleave with a concurrent
+        evaluation reading the pre-approval total.
         """
-        moment = self.now()
-        item = self.approvals.resolve(
-            item_id, role=role, approve=approve, note=note, now=moment
-        )
-        return self._finalize(item, approve=approve, moment=moment, note=note)
+        with self._decision_lock:
+            moment = self.now()
+            item = self.approvals.resolve(
+                item_id, role=role, approve=approve, note=note, now=moment
+            )
+            return self._finalize(item, approve=approve, moment=moment, note=note)
 
     def _finalize(
+        self,
+        item: PendingView,
+        *,
+        approve: bool,
+        moment: datetime,
+        note: str | None,
+        timed_out: bool = False,
+    ) -> AuthorizationResult:
+        """Record the final answer to a queued approval.
+
+        Takes the decision lock because an approval commits spend. The lock is
+        reentrant, so calling this from :meth:`resolve` (which already holds it)
+        is safe, while the long-polling path in :meth:`authorize_blocking`
+        acquires it here.
+        """
+        with self._decision_lock:
+            return self._finalize_locked(
+                item, approve=approve, moment=moment, note=note, timed_out=timed_out
+            )
+
+    def _finalize_locked(
         self,
         item: PendingView,
         *,

@@ -97,6 +97,13 @@ payment traffic needs TLS termination, which v1 does not do (see
 the caller. An agent that can reach `/authorize` can claim to be any agent in
 the policy. Bind to loopback and treat network reachability as the boundary.
 
+**x402 over the proxy is not fully enforceable.** The adapter reads a 402
+challenge, which is a *response*. An agent's follow-up payment carries an
+`X-PAYMENT` header whose payload names an amount in atomic units but no asset
+decimals, so its true value cannot be determined without an off-chain lookup the
+engine is not allowed to make. bouncer denies what it cannot price. Send x402
+intents to `/authorize` explicitly, where the challenge supplies the scale.
+
 ---
 
 ## What this is not
@@ -236,6 +243,11 @@ export_jsonl(log, "audit.jsonl")
 An exported file re-verifies standalone from the operator's **public** key, so
 an auditor can check a log you hand them without database access or your
 signing key.
+
+Spent mandate nonces accumulate in the same database. `bouncer purge` drops the
+ones whose mandates have expired — safe by construction, since an expired
+mandate is already rejected on the expiry check. It never touches the
+append-only audit log. Run it from cron if you are issuing a lot of mandates.
 
 ---
 

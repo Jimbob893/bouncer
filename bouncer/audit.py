@@ -35,7 +35,7 @@ from decimal import Decimal
 from pathlib import Path
 from typing import IO, Any
 
-from sqlalchemy import Engine, Index, Integer, String, Text, select
+from sqlalchemy import Engine, Index, Integer, String, Text, func, select
 from sqlalchemy.orm import Mapped, Session, mapped_column
 
 from .canonical import canonical_json, sha256_hex, utc_iso
@@ -257,7 +257,10 @@ class AuditLog:
 
     def count(self) -> int:
         with self._sessions() as session:
-            return len(session.execute(select(AuditEntry.seq)).scalars().all())
+            total = session.execute(
+                select(func.count()).select_from(AuditEntry)
+            ).scalar_one()
+            return int(total)
 
     def entries(self, *, limit: int | None = None) -> list[AuditEntry]:
         with self._sessions() as session:
