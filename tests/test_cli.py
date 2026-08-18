@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import re
 from pathlib import Path
 
@@ -55,6 +56,11 @@ def test_init_creates_key_and_policy(tmp_path: Path) -> None:
     assert "key id:" in output
 
 
+@pytest.mark.skipif(
+    os.name == "nt",
+    reason="POSIX mode bits are advisory on Windows; the key is protected by "
+    "the directory ACL instead, which bouncer does not set (see keys.py)",
+)
 def test_key_file_is_owner_only(tmp_path: Path) -> None:
     workspace = tmp_path / "fresh"
     run(workspace, "init")

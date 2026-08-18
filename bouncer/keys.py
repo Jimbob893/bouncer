@@ -10,6 +10,12 @@ signature proves is narrow and worth stating precisely:
   who holds the key can write a consistent, correctly-signed history.
 
 The private key is written with mode 0600 and never leaves this process.
+
+That protection is POSIX-only. On Windows the mode bits ``os.open`` accepts
+are advisory — the file lands under inherited ACLs and ``st_mode`` reports
+``-rw-rw-rw-`` regardless — so bouncer neither restricts the key nor can it
+tell whether the key is exposed. On Windows, treat the key file as protected
+only as far as the enclosing directory's ACL protects it.
 """
 
 from __future__ import annotations
@@ -142,7 +148,8 @@ class OperatorKey:
             encryption_algorithm=serialization.NoEncryption(),
         )
         # Create with 0600 from the outset rather than chmod-ing afterwards,
-        # which would leave a window where the key is world-readable.
+        # which would leave a window where the key is world-readable. Windows
+        # ignores the mode argument; see the module docstring.
         descriptor = os.open(
             file_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, stat.S_IRUSR | stat.S_IWUSR
         )
@@ -152,6 +159,13 @@ class OperatorKey:
 
     @staticmethod
     def _warn_if_world_readable(path: Path) -> None:
+        # Windows synthesises st_mode: every readable file reports group and
+        # other read, so this check would fire on every load while telling the
+        # operator nothing about the actual ACL. A warning that is always wrong
+        # trains people to ignore it, so stay quiet rather than cry wolf. The
+        # exposure this leaves is stated in the module docstring.
+        if os.name == "nt":
+            return
         try:
             mode = path.stat().st_mode
         except OSError:  # pragma: no cover - stat succeeded moments earlier

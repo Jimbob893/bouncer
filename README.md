@@ -289,9 +289,14 @@ factor-of-a-million error.
 
 ```bash
 uv venv --python 3.12 && uv pip install -e ".[dev]"
-.venv/bin/python -m pytest          # 214 tests, ~3s
+.venv/bin/python -m pytest          # 223 tests, ~4s
 .venv/bin/python -m mypy            # strict, clean
 ```
+
+On Windows the interpreter is `.venv\Scripts\python.exe`, and one test skips:
+key file permissions are POSIX mode bits, which Windows does not honour. The
+key is left under the inherited directory ACL there — see the note in
+`bouncer/keys.py`.
 
 Standards: type hints everywhere, `mypy --strict` clean, no `TODO` in committed
 code (it goes in [ROADMAP.md](ROADMAP.md)), tests under 10 seconds, and a

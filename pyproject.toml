@@ -24,6 +24,10 @@ dependencies = [
     "sqlalchemy>=2.0",
     "cryptography>=42.0",
     "pyyaml>=6.0",
+    # Not a capability, a data file: zoneinfo reads the IANA database from the
+    # OS, and Windows ships none. Without it every `time_windows.timezone` —
+    # including "UTC" — fails policy validation, which denies everything.
+    "tzdata; sys_platform == 'win32'",
 ]
 
 [project.optional-dependencies]
@@ -39,7 +43,7 @@ dev = [
 bouncer = "bouncer.cli:main"
 
 [project.urls]
-Source = "https://github.com/bouncer-dev/bouncer"
+Source = "https://github.com/Jimbob893/bouncer"
 
 [build-system]
 requires = ["hatchling"]

@@ -139,7 +139,15 @@ def cmd_init(args: argparse.Namespace, out: TextIO) -> int:
         key = OperatorKey.load(config.key_path)
     else:
         key = OperatorKey.generate(config.key_path)
-        out.write(f"generated operator key at {config.key_path} (mode 0600)\n")
+        # Claim only the protection actually applied. os.open's mode argument is
+        # ignored on Windows, so printing "mode 0600" there would advertise a
+        # restriction that is not in force — the one kind of inaccuracy this
+        # tool must never print about its own signing key.
+        if os.name == "nt":
+            protection = "inherits the directory ACL; Windows ignores POSIX modes"
+        else:
+            protection = "mode 0600"
+        out.write(f"generated operator key at {config.key_path} ({protection})\n")
 
     if config.policy_path.exists():
         out.write(f"policy already present at {config.policy_path}\n")
