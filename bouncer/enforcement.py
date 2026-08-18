@@ -321,8 +321,15 @@ class Enforcer:
         Threat model: the wait **times out into a deny**. A request that nobody
         answered is not an approved request, and an operator who is asleep must
         not become an implicit rubber stamp.
+
+        Every synchronous step is pushed to a worker thread. Each one takes the
+        decision lock and commits to SQLite, so running them inline would block
+        the event loop — and a request parked here waiting on a human would take
+        the whole server down with it for the duration. No lock is ever held
+        across an ``await``, so moving these off-thread cannot deadlock and does
+        not weaken the serialization the lock provides.
         """
-        result = self.authorize(intent)
+        result = await asyncio.to_thread(self.authorize, intent)
         if result.decision.outcome is not Outcome.REQUIRE_APPROVAL:
             return result
 
@@ -332,21 +339,29 @@ class Enforcer:
 
         while asyncio.get_running_loop().time() < deadline:
             await asyncio.sleep(_APPROVAL_POLL_SECONDS)
-            item = self.approvals.get(result.pending_id)
+            item = await asyncio.to_thread(self.approvals.get, result.pending_id)
             if item.status is ApprovalStatus.APPROVED:
-                return self._finalize(item, approve=True, moment=self.now(), note=item.note)
+                return await asyncio.to_thread(
+                    self._finalize, item, approve=True, moment=self.now(), note=item.note
+                )
             if item.status in (ApprovalStatus.DENIED, ApprovalStatus.TIMED_OUT):
-                return self._finalize(item, approve=False, moment=self.now(), note=item.note)
+                return await asyncio.to_thread(
+                    self._finalize, item, approve=False, moment=self.now(), note=item.note
+                )
 
-        expired = self.approvals.expire(result.pending_id, now=self.now())
+        expired = await asyncio.to_thread(
+            self.approvals.expire, result.pending_id, now=self.now()
+        )
         if expired is None:
             # Resolved in the gap between the last poll and the timeout.
-            item = self.approvals.get(result.pending_id)
+            item = await asyncio.to_thread(self.approvals.get, result.pending_id)
             approved = item.status is ApprovalStatus.APPROVED
-            return self._finalize(item, approve=approved, moment=self.now(), note=item.note)
+            return await asyncio.to_thread(
+                self._finalize, item, approve=approved, moment=self.now(), note=item.note
+            )
 
-        return self._finalize(
-            expired, approve=False, moment=self.now(), note=None, timed_out=True
+        return await asyncio.to_thread(
+            self._finalize, expired, approve=False, moment=self.now(), note=None, timed_out=True
         )
 
     # -- notifications ----------------------------------------------------

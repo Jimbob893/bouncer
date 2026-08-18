@@ -12,6 +12,7 @@ interface would let anyone on the network do the same. See README.md.
 
 from __future__ import annotations
 
+import asyncio
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
@@ -195,11 +196,17 @@ def create_app(config: BouncerConfig | None = None, *, enforcer: Enforcer | None
                 rail="unparsed",
                 description=f"{ctx.method} {ctx.url}"[:512] or None,
             )
-            return _respond(engine.deny_unparseable(exc, placeholder))
+            return _respond(await asyncio.to_thread(engine.deny_unparseable, exc, placeholder))
 
         if wait:
             return _respond(await engine.authorize_blocking(intent, timeout=timeout))
-        return _respond(engine.authorize(intent))
+        # Off the event loop: authorize() takes the decision lock and commits
+        # under synchronous=FULL, so it blocks for an fsync — and for up to the
+        # 30s busy_timeout if another process holds the write lock. Run inline
+        # and one authorization would stall every other request, /healthz
+        # included. The sibling endpoints are plain `def`, which FastAPI already
+        # runs in its threadpool; only the async ones need this.
+        return _respond(await asyncio.to_thread(engine.authorize, intent))
 
     @app.post("/mandates/verify")
     def verify(request: VerifyMandateRequest) -> JSONResponse:
