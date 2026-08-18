@@ -11,6 +11,14 @@ does not buy you.
 
 from __future__ import annotations
 
+from .client import (
+    ApprovalRequired,
+    Authorized,
+    Client,
+    InvalidSpend,
+    SpendDenied,
+    SpendRefused,
+)
 from .engine import evaluate, evaluate_tunnel
 from .errors import BouncerError, PolicyError, UnparseableIntent
 from .models import Decision, Outcome, PaymentIntent, ReasonCode, SpendRecord
@@ -20,8 +28,12 @@ from .sources import LoadedPolicy, LocalFileSource, PolicySource
 __version__ = "0.1.0"
 
 __all__ = [
+    "ApprovalRequired",
+    "Authorized",
     "BouncerError",
+    "Client",
     "Decision",
+    "InvalidSpend",
     "LoadedPolicy",
     "LocalFileSource",
     "Outcome",
@@ -31,7 +43,9 @@ __all__ = [
     "PolicySource",
     "ReasonCode",
     "RuleSet",
+    "SpendDenied",
     "SpendRecord",
+    "SpendRefused",
     "UnparseableIntent",
     "__version__",
     "evaluate",
