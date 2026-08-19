@@ -1,5 +1,7 @@
 [project]
-name = "bouncer"
+# The distribution name is `agent-bouncer` because `bouncer` on PyPI is an
+# unrelated 2014 authorization library. The import package stays `bouncer`.
+name = "agent-bouncer"
 version = "0.1.0"
 description = "A policy enforcement point for agent spending: blocks transactions that violate a declarative policy and writes a tamper-evident, signed audit log of every decision."
 readme = "README.md"
@@ -45,6 +47,9 @@ bouncer = "bouncer.cli:main"
 
 [project.urls]
 Source = "https://github.com/nmaltese13/bouncer"
+Issues = "https://github.com/nmaltese13/bouncer/issues"
+Changelog = "https://github.com/nmaltese13/bouncer/releases"
+Security = "https://github.com/nmaltese13/bouncer/blob/main/SECURITY.md"
 
 [build-system]
 requires = ["hatchling"]
@@ -52,6 +57,12 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["bouncer"]
+
+[tool.hatch.build.targets.sdist]
+# Tests and examples ship so the sdist is buildable and verifiable. The demo
+# recording does not: it is 2.4 MB against a 77 KB library, and the README
+# references it by absolute URL.
+exclude = ["docs/demo.gif", "/.github", "/scripts"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

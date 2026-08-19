@@ -35,7 +35,7 @@ all *logged* outcomes, never silent pass-throughs.
 
 ## See it work
 
-![bouncer demo: an allowed payment, a blocked one, an approval routed to a human, then the audit chain verifying and detecting tampering](docs/demo.gif)
+![bouncer demo: an allowed payment, a blocked one, an approval routed to a human, then the audit chain verifying and detecting tampering](https://raw.githubusercontent.com/nmaltese13/bouncer/main/docs/demo.gif)
 
 Every line in that recording is real CLI output, captured by
 [`scripts/record_demo.py`](scripts/record_demo.py).
@@ -61,6 +61,21 @@ Nothing here has been security audited. See [SECURITY.md](SECURITY.md) and the
 full [threat model](#threat-model) below.
 
 ---
+
+## Install
+
+From source, which is the supported path today:
+
+```bash
+git clone https://github.com/nmaltese13/bouncer.git
+cd bouncer
+pip install -e .
+```
+
+The package builds a clean wheel and is ready for PyPI under the distribution
+name **`agent-bouncer`** — `bouncer` there is an unrelated 2014 authorization
+library. Once published, `pip install agent-bouncer` will install it; the import
+stays `import bouncer` either way.
 
 ## Quickstart
 
