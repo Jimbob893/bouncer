@@ -3,6 +3,7 @@
 **A policy enforcement point for agent spending.**
 
 [![CI](https://github.com/nmaltese13/bouncer/actions/workflows/ci.yml/badge.svg)](https://github.com/nmaltese13/bouncer/actions/workflows/ci.yml)
+[![PyPI](https://img.shields.io/pypi/v/agent-bouncer)](https://pypi.org/project/agent-bouncer/)
 [![Coverage 88%](https://img.shields.io/badge/coverage-88%25-brightgreen)](#development)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
@@ -64,18 +65,12 @@ full [threat model](#threat-model) below.
 
 ## Install
 
-From source, which is the supported path today:
-
 ```bash
-git clone https://github.com/nmaltese13/bouncer.git
-cd bouncer
-pip install -e .
+pip install agent-bouncer
 ```
 
-The package builds a clean wheel and is ready for PyPI under the distribution
-name **`agent-bouncer`** — `bouncer` there is an unrelated 2014 authorization
-library. Once published, `pip install agent-bouncer` will install it; the import
-stays `import bouncer` either way.
+The distribution is `agent-bouncer`; the import is `bouncer`. (`bouncer` on PyPI
+is an unrelated 2014 authorization library.)
 
 ## Quickstart
 
@@ -83,11 +78,7 @@ Copy and paste the whole block. Every line runs as written, against the starter
 policy `bouncer init` generates — no editing required to see it work.
 
 ```bash
-git clone https://github.com/nmaltese13/bouncer.git
-cd bouncer
-python -m venv .venv
-. .venv/bin/activate          # Windows: .venv\Scripts\activate
-pip install -e .
+pip install agent-bouncer
 
 bouncer init                  # operator key + starter policy in ~/.bouncer
 bouncer policy                # show exactly what will be enforced
@@ -119,9 +110,10 @@ server up, `http://127.0.0.1:8080/docs` is a full interactive console for
 `POST /authorize` — the quickest way to show someone the enforcement working.
 
 Two runnable examples, both using throwaway state so your real `~/.bouncer` is
-never touched:
+never touched. They ship in the repository rather than the wheel:
 
 ```bash
+git clone https://github.com/nmaltese13/bouncer.git && cd bouncer
 python examples/agent.py   # a toy agent with a $50 budget, spending until it is stopped
 python examples/demo.py    # six purchases, ending with the audit chain caught being tampered with
 ```

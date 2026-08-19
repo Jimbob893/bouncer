@@ -7,7 +7,7 @@ description = "A policy enforcement point for agent spending: blocks transaction
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.11"
-authors = [{ name = "bouncer contributors" }]
+authors = [{ name = "Nicholas Maltese" }]
 keywords = ["agents", "payments", "policy", "audit", "authorization"]
 classifiers = [
     "Development Status :: 3 - Alpha",
