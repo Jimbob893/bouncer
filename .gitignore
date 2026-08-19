@@ -10,3 +10,7 @@ build/
 *.db-wal
 *.db-shm
 *.pem
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/

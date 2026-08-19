@@ -3,6 +3,7 @@
 **A policy enforcement point for agent spending.**
 
 [![CI](https://github.com/Jimbob893/bouncer/actions/workflows/ci.yml/badge.svg)](https://github.com/Jimbob893/bouncer/actions/workflows/ci.yml)
+[![Coverage 88%](https://img.shields.io/badge/coverage-88%25-brightgreen)](#development)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Checked with mypy](https://img.shields.io/badge/mypy-strict-blue)](http://mypy-lang.org/)
@@ -11,31 +12,94 @@ bouncer sits between an AI agent and any payment rail, blocks transactions that
 violate a declarative policy, and writes a tamper-evident, signed audit log of
 every decision.
 
-It never custodies funds.
+```mermaid
+flowchart LR
+    A["AI agent"] -->|"payment intent"| B{"bouncer<br/>policy engine"}
 
+    B -->|"ALLOW"| M["signed mandate<br/>Ed25519, scoped, TTL"]
+    B -->|"DENY"| X["blocked<br/>403"]
+    B -->|"REQUIRE_APPROVAL"| H["approval queue<br/>tagged by role"]
+
+    H -->|"human approves"| M
+    H -->|"denied or timed out"| X
+    M --> R["payment rail<br/>Stripe, x402, ..."]
+
+    B -.->|"every decision, always"| L[("hash-chained audit log<br/>Ed25519-signed, append-only")]
+
+    style X stroke-dasharray: 4 3
+    style L stroke-width:2px
 ```
-agent ──> bouncer proxy ──> [policy engine] ──> payment rail
-                                  │
-                                  ├──> signed mandate (Ed25519, scoped, TTL)
-                                  ├──> hash-chained audit log (SQLite)
-                                  └──> approval queue (if over threshold,
-                                       tagged by role)
-```
+
+Every path through that diagram ends in an audit entry — including the ones
+that fail. A denial, an unparseable request and an approval that timed out are
+all *logged* outcomes, never silent pass-throughs.
+
+## See it work
+
+![bouncer demo: an allowed payment, a blocked one, an approval routed to a human, then the audit chain verifying and detecting tampering](docs/demo.gif)
+
+Every line in that recording is real CLI output, captured by
+[`scripts/record_demo.py`](scripts/record_demo.py).
+
+## Trust boundary
+
+Read this before deciding bouncer is a control you can rely on.
+
+**bouncer is the policy *decision* point. Your network is the *enforcement*
+point.** Three limits follow, and none of them are bugs:
+
+- **It never custodies funds.** bouncer emits a signed authorization; something
+  else settles the payment. It cannot freeze, claw back or reverse anything.
+  This is deliberate — holding money means needing a money transmitter licence.
+- **It cannot stop an agent that bypasses it.** An agent with unrestricted
+  network egress can ignore the proxy and connect directly. Real containment
+  requires firewall or container rules that make bouncer the only route out.
+- **It does not replace your payment provider's controls.** Keep your card
+  limits, processor-side fraud rules and provider spending caps configured
+  independently. bouncer is a layer in front of them, not a substitute.
+
+Nothing here has been security audited. See [SECURITY.md](SECURITY.md) and the
+full [threat model](#threat-model) below.
 
 ---
 
 ## Quickstart
 
+Copy and paste the whole block. Every line runs as written, against the starter
+policy `bouncer init` generates — no editing required to see it work.
+
 ```bash
-pip install -e .                                    # 1. install
-bouncer init                                        # 2. key + starter policy in ~/.bouncer
-$EDITOR ~/.bouncer/policy.yaml                      # 3. write your rules
+git clone https://github.com/Jimbob893/bouncer.git
+cd bouncer
+python -m venv .venv
+. .venv/bin/activate          # Windows: .venv\Scripts\activate
+pip install -e .
 
-bouncer check --agent research-bot \                # 4. ask it a question
-  --merchant api.openai.com --amount 5.00
+bouncer init                  # operator key + starter policy in ~/.bouncer
+bouncer policy                # show exactly what will be enforced
 
-bouncer serve                                       # 5. or run it as an API on :8080
+# Allowed: inside the cap and on the allowlist
+bouncer check --agent research-bot --merchant api.openai.com --amount 5.00
+
+# Blocked: over the 25.00 per-transaction cap
+bouncer check --agent research-bot --merchant api.openai.com --amount 500.00
+
+# Blocked: merchant is on the denylist
+bouncer check --agent research-bot --merchant lucky.casino.example --amount 1.00
+
+# Needs a human: above the 10.00 approval threshold
+bouncer check --agent research-bot --merchant api.openai.com --amount 15.00
+bouncer pending --role finance
+
+# Every decision above, hash-chained and signed
+bouncer verify
 ```
+
+`bouncer check` exits `0` when allowed, `2` when denied and `3` when the audit
+chain is broken, so it drops straight into a shell pipeline.
+
+Then edit `~/.bouncer/policy.yaml` to write your own rules, and run
+`bouncer serve` to expose the same decisions as a local API on `:8080`.
 
 Then watch it work:
 

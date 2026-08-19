@@ -35,6 +35,7 @@ dev = [
     "pytest>=8.0",
     # starlette's TestClient requires httpx2; httpx is only the legacy fallback.
     "httpx2>=0.28",
+    "pytest-cov>=5.0",
     "mypy>=1.9",
     "types-pyyaml>=6.0",
 ]
