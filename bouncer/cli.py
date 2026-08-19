@@ -388,8 +388,15 @@ def cmd_serve(args: argparse.Namespace, out: TextIO) -> int:
 
     config = _config(args)
     app = create_app(config)
-    out.write(f"bouncer API on http://{args.host}:{args.port}\n")
-    out.write(f"policy: {config.policy_path}\ndatabase: {config.db_path}\n")
+    base = f"http://{args.host}:{args.port}"
+    out.write(
+        f"bouncer API on {base}\n"
+        f"interactive console: {base}/docs\n"
+        f"\npolicy: {config.policy_path}\ndatabase: {config.db_path}\n"
+        "\nThis stays in the foreground. Leave it running and use another\n"
+        "terminal or a browser; stopping it closes the port.\n\n"
+    )
+    out.flush()
     uvicorn.run(app, host=args.host, port=args.port, log_level=args.log_level)
     return EXIT_OK
 
