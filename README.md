@@ -94,17 +94,21 @@ bouncer pending --role finance
 bouncer verify
 ```
 
-`bouncer check` exits `0` when allowed, `2` when denied and `3` when the audit
-chain is broken, so it drops straight into a shell pipeline.
+`bouncer check` exits `0` when the payment is allowed, `2` when it is not —
+denied *or* held for a human — and `3` when the audit chain is broken, so it
+drops straight into a shell pipeline.
 
 From there, edit `~/.bouncer/policy.yaml` to write your own rules, and run
-`bouncer serve` to expose the same decisions as a local API on `:8080`.
+`bouncer serve` to expose the same decisions as a local API on `:8080`. With the
+server up, `http://127.0.0.1:8080/docs` is a full interactive console for
+`POST /authorize` — the quickest way to show someone the enforcement working.
 
-For a longer scripted run — six purchases including a rolling-window breach and
-a replayed mandate, ending with the audit chain being tampered with and caught:
+Two runnable examples, both using throwaway state so your real `~/.bouncer` is
+never touched:
 
 ```bash
-python examples/demo.py
+python examples/agent.py   # a toy agent with a $50 budget, spending until it is stopped
+python examples/demo.py    # six purchases, ending with the audit chain caught being tampered with
 ```
 
 ---

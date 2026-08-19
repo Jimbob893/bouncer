@@ -61,9 +61,33 @@ def test_demo_shows_the_chain_verifying_then_breaking(demo_output: str) -> None:
     assert "CHAIN BROKEN at entry seq=" in demo_output
 
 
-def test_demo_leaves_no_state_behind(demo_output: str) -> None:
-    """It must run from a clean checkout without touching ~/.bouncer."""
-    assert not (Path.home() / ".bouncer").exists()
+def test_demo_leaves_no_state_behind(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The demo must not create or disturb the operator's real ~/.bouncer.
+
+    Asserting the directory simply does not exist would be wrong: anyone who
+    has followed the quickstart has one, and the demo not touching it is a
+    different claim from it never having existed. So snapshot it and compare.
+    """
+    real_home = Path.home() / ".bouncer"
+    before_exists = real_home.exists()
+    before = (
+        sorted((p.name, p.stat().st_mtime_ns) for p in real_home.iterdir())
+        if before_exists
+        else []
+    )
+
+    monkeypatch.setenv("NO_COLOR", "1")
+    monkeypatch.syspath_prepend(str(EXAMPLES.parent))
+    with pytest.raises(SystemExit):
+        runpy.run_path(str(EXAMPLES / "demo.py"), run_name="__main__")
+    capsys.readouterr()
+
+    assert real_home.exists() == before_exists, "the demo created ~/.bouncer"
+    if before_exists:
+        after = sorted((p.name, p.stat().st_mtime_ns) for p in real_home.iterdir())
+        assert after == before, "the demo modified the real ~/.bouncer"
 
 
 def test_sample_policy_is_valid() -> None:
