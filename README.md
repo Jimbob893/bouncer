@@ -30,8 +30,11 @@ agent ──> bouncer proxy ──> [policy engine] ──> payment rail
 pip install -e .                                    # 1. install
 bouncer init                                        # 2. key + starter policy in ~/.bouncer
 $EDITOR ~/.bouncer/policy.yaml                      # 3. write your rules
-bouncer serve &                                     # 4. run the decision point
-export HTTP_PROXY=http://127.0.0.1:8081             # 5. point your agent at it
+
+bouncer check --agent research-bot \                # 4. ask it a question
+  --merchant api.openai.com --amount 5.00
+
+bouncer serve                                       # 5. or run it as an API on :8080
 ```
 
 Then watch it work:
