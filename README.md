@@ -26,7 +26,6 @@ flowchart LR
 
     B -.->|"every decision, always"| L[("hash-chained audit log<br/>Ed25519-signed, append-only")]
 
-    style X stroke-dasharray: 4 3
     style L stroke-width:2px
 ```
 
