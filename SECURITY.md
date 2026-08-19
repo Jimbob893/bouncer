@@ -23,7 +23,7 @@ This is pre-1.0 software. Fixes land on `main`; there is no backport branch.
 
 Report privately through GitHub:
 
-1. Go to the [Security tab](https://github.com/Jimbob893/bouncer/security/advisories/new).
+1. Go to the [Security tab](https://github.com/nmaltese13/bouncer/security/advisories/new).
 2. Click **Report a vulnerability**.
 3. Describe the issue and how to reproduce it.
 

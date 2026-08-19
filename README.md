@@ -2,7 +2,7 @@
 
 **A policy enforcement point for agent spending.**
 
-[![CI](https://github.com/Jimbob893/bouncer/actions/workflows/ci.yml/badge.svg)](https://github.com/Jimbob893/bouncer/actions/workflows/ci.yml)
+[![CI](https://github.com/nmaltese13/bouncer/actions/workflows/ci.yml/badge.svg)](https://github.com/nmaltese13/bouncer/actions/workflows/ci.yml)
 [![Coverage 88%](https://img.shields.io/badge/coverage-88%25-brightgreen)](#development)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
@@ -69,7 +69,7 @@ Copy and paste the whole block. Every line runs as written, against the starter
 policy `bouncer init` generates — no editing required to see it work.
 
 ```bash
-git clone https://github.com/Jimbob893/bouncer.git
+git clone https://github.com/nmaltese13/bouncer.git
 cd bouncer
 python -m venv .venv
 . .venv/bin/activate          # Windows: .venv\Scripts\activate
@@ -98,19 +98,15 @@ bouncer verify
 `bouncer check` exits `0` when allowed, `2` when denied and `3` when the audit
 chain is broken, so it drops straight into a shell pipeline.
 
-Then edit `~/.bouncer/policy.yaml` to write your own rules, and run
+From there, edit `~/.bouncer/policy.yaml` to write your own rules, and run
 `bouncer serve` to expose the same decisions as a local API on `:8080`.
 
-Then watch it work:
+For a longer scripted run — six purchases including a rolling-window breach and
+a replayed mandate, ending with the audit chain being tampered with and caught:
 
 ```bash
 python examples/demo.py
 ```
-
-Six purchases against a sample policy: one allowed, one over the per-transaction
-cap, one to a denied merchant, one that trips the rolling window, one held for a
-human approver, and one replayed mandate. It finishes by verifying the audit
-chain, then tampering with a row to show the evidence fire.
 
 ---
 
@@ -134,7 +130,7 @@ more than it does.
   the proxy entirely. Actual containment requires egress control at the
   network or container layer — firewall rules that make bouncer the only route
   out. bouncer is the policy decision point; the network is the enforcement
-  point. Say this plainly in the README.
+  point.
 - **CLI roles are not authenticated.** `--role finance` is an assertion by
   whoever has shell access, not a login. v1 assumes a single trusted operator
   on a trusted machine. Anyone who can run the CLI can approve anything.

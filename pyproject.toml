@@ -44,7 +44,7 @@ dev = [
 bouncer = "bouncer.cli:main"
 
 [project.urls]
-Source = "https://github.com/Jimbob893/bouncer"
+Source = "https://github.com/nmaltese13/bouncer"
 
 [build-system]
 requires = ["hatchling"]
