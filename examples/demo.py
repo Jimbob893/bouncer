@@ -46,6 +46,45 @@ POLICY_PATH = Path(__file__).parent / "policy.yaml"
 _USE_COLOR = sys.stdout.isatty() and not os.environ.get("NO_COLOR")
 
 
+def _stdout_handles(text: str) -> bool:
+    """Can stdout actually encode this?
+
+    A redirected stdout on Windows defaults to the legacy ANSI codepage, which
+    has no box drawing. Printing to it raises UnicodeEncodeError and takes the
+    whole demo down -- so ask before printing rather than crash halfway.
+    """
+    encoding = getattr(sys.stdout, "encoding", None) or "ascii"
+    try:
+        text.encode(encoding)
+    except (UnicodeEncodeError, LookupError):
+        return False
+    return True
+
+
+# Prefer real UTF-8 when the stream can be switched to it; fall back to ASCII
+# glyphs when it cannot, so the demo stays legible everywhere.
+_reconfigure = getattr(sys.stdout, "reconfigure", None)
+if _reconfigure is not None and not _stdout_handles("═"):
+    try:
+        _reconfigure(encoding="utf-8")
+    except (ValueError, OSError):  # pragma: no cover - stream not reconfigurable
+        pass
+
+_FANCY = _stdout_handles("═─└→✔✘⏸…·—≤")
+
+HEAVY = "═" if _FANCY else "="
+LIGHT = "─" if _FANCY else "-"
+ELBOW = "└" if _FANCY else "\\"
+ARROW = "→" if _FANCY else "->"
+TICK = "✔" if _FANCY else "OK"
+CROSS = "✘" if _FANCY else "X"
+PAUSE = "⏸" if _FANCY else "~"
+ELLIPSIS = "…" if _FANCY else "..."
+DOT = "·" if _FANCY else "*"
+DASH = "—" if _FANCY else "--"
+LTE = "≤" if _FANCY else "<="
+
+
 def _c(code: str, text_value: str) -> str:
     return f"\033[{code}m{text_value}\033[0m" if _USE_COLOR else text_value
 
@@ -86,27 +125,27 @@ class Clock:
         return self.now
 
 
-def rule(char: str = "─") -> None:
+def rule(char: str = LIGHT) -> None:
     print(DIM(char * WIDTH))
 
 
 def banner() -> None:
     print()
-    rule("═")
-    print(BOLD("  bouncer") + DIM("  ·  policy enforcement for agent spending"))
-    rule("═")
+    rule(HEAVY)
+    print(BOLD("  bouncer") + DIM(f"  {DOT}  policy enforcement for agent spending"))
+    rule(HEAVY)
 
 
 def show_outcome(result: AuthorizationResult) -> None:
     decision = result.decision
     if decision.outcome is Outcome.ALLOW:
-        badge = GREEN("✔ ALLOW")
+        badge = GREEN(f"{TICK} ALLOW")
     elif decision.outcome is Outcome.DENY:
-        badge = RED("✘ DENY")
+        badge = RED(f"{CROSS} DENY")
     else:
-        badge = YELLOW("⏸ APPROVAL")
+        badge = YELLOW(f"{PAUSE} APPROVAL")
     print(f"    {badge}  {DIM(decision.reason_code.value)}")
-    print(f"    {DIM('└')} {decision.reason}")
+    print(f"    {DIM(ELBOW)} {decision.reason}")
     if decision.rule:
         print(f"      {DIM('rule: ' + decision.rule)}")
 
@@ -159,16 +198,16 @@ def run(home: Path) -> int:
 
     banner()
     print(f"  {DIM('policy')}      {POLICY_PATH.name}")
-    print(f"  {DIM('policy hash')} {loaded.policy_hash[:32]}…")
+    print(f"  {DIM('policy hash')} {loaded.policy_hash[:32]}{ELLIPSIS}")
     print(f"  {DIM('agent')}       research-bot")
     print(
-        f"  {DIM('limits')}      ${rules.per_transaction_cap} per transaction  ·  "
+        f"  {DIM('limits')}      ${rules.per_transaction_cap} per transaction  {DOT}  "
         f"${rules.rolling_windows[0].amount} per {rules.rolling_windows[0].window}"
     )
     assert rules.approval_required_above is not None
     print(
         f"  {DIM('approval')}    above ${rules.approval_required_above.amount} "
-        f"→ role {rules.approval_required_above.approver_role!r}"
+        f"{ARROW} role {rules.approval_required_above.approver_role!r}"
     )
 
     # Give the agent a believable spending history. Each seeded purchase stays
@@ -208,13 +247,13 @@ def run(home: Path) -> int:
         ),
     )
     assert allowed.mandate is not None
-    print(f"      {DIM('mandate:')} {allowed.mandate[:44]}…")
+    print(f"      {DIM('mandate:')} {allowed.mandate[:44]}{ELLIPSIS}")
     claims = verify_mandate(
         allowed.mandate, key, now=clock.now, nonce_store=nonces
     )
     print(
         f"      {GREEN('redeemed once')} "
-        + DIM(f"(scoped to {claims.merchant}, ≤ ${claims.max_amount}, expires "
+        + DIM(f"(scoped to {claims.merchant}, {LTE} ${claims.max_amount}, expires "
               f"{claims.expires_at.strftime('%H:%M:%S')}Z)")
     )
 
@@ -270,13 +309,13 @@ def run(home: Path) -> int:
     except Exception as exc:  # RoleMismatch
         wrong = exc
     print(f"      {DIM('$ bouncer approve ' + pending.pending_id + ' --role engineering')}")
-    print(f"      {RED('✘ refused')}  {DIM(str(wrong))}")
+    print(f"      {RED(f"{CROSS} refused")}  {DIM(str(wrong))}")
 
     print(f"      {DIM('$ bouncer approve ' + pending.pending_id + ' --role finance')}")
     approved = enforcer.resolve(
         pending.pending_id, role="finance", approve=True, note="ok for Q1 research"
     )
-    print(f"      {GREEN('✔ approved')}  {DIM(approved.decision.reason)}")
+    print(f"      {GREEN(f"{TICK} approved")}  {DIM(approved.decision.reason)}")
 
     # -- 5. trips the rolling window --------------------------------------
     attempt(
@@ -298,17 +337,17 @@ def run(home: Path) -> int:
     print(f"    {CYAN('$12.00')} to api.weather.example  {DIM('(same mandate, second use)')}")
     try:
         verify_mandate(allowed.mandate, key, now=clock.now, nonce_store=nonces)
-        print(f"    {RED('✘ BUG: replay succeeded')}")
+        print(f"    {RED(f"{CROSS} BUG: replay succeeded")}")
         return 1
     except MandateError as exc:
-        print(f"    {RED('✘ REJECTED')}  {DIM(type(exc).__name__)}")
-        print(f"    {DIM('└')} {exc}")
+        print(f"    {RED(f"{CROSS} REJECTED")}  {DIM(type(exc).__name__)}")
+        print(f"    {DIM(ELBOW)} {exc}")
 
     # -- the audit log ----------------------------------------------------
     print()
-    rule("═")
+    rule(HEAVY)
     print(BOLD("  The audit log"))
-    rule("═")
+    rule(HEAVY)
     print()
     print(f"  {DIM('seq  outcome           reason                  amount')}")
     for entry in audit.entries():
@@ -325,7 +364,7 @@ def run(home: Path) -> int:
     result = audit.verify()
     print()
     print(f"  {DIM('$ bouncer verify')}")
-    print(f"  {GREEN('✔ ' + result.describe())}")
+    print(f"  {GREEN(f"{TICK} " + result.describe())}")
 
     # Now break it, to show the evidence is real. Pick a row that really was a
     # denial, so flipping it to ALLOW is a genuine change rather than a no-op.
@@ -334,7 +373,7 @@ def run(home: Path) -> int:
     print(
         f"  {DIM(f'An attacker edits row {victim} directly in SQLite, flipping a blocked')}"
     )
-    print(f"  {DIM('payment to an authorized one…')}")
+    print(f"  {DIM('payment to an authorized one{ELLIPSIS}')}")
     with audit.engine.begin() as connection:
         connection.execute(
             text("UPDATE audit_entries SET outcome='ALLOW' WHERE seq=:seq"),
@@ -342,18 +381,18 @@ def run(home: Path) -> int:
         )
     broken = audit.verify()
     print(f"  {DIM('$ bouncer verify')}")
-    print(f"  {RED('✘ ' + broken.describe())}")
+    print(f"  {RED(f"{CROSS} " + broken.describe())}")
     if broken.ok:
         print(f"  {RED('BUG: tampering went undetected')}")
         return 1
 
     print()
-    rule("═")
+    rule(HEAVY)
     print(
         DIM("  bouncer is the policy decision point. Pair it with egress control\n"
-            "  at the network layer — it is not a sandbox on its own.")
+            "  at the network layer " + DASH + " it is not a sandbox on its own.")
     )
-    rule("═")
+    rule(HEAVY)
     print()
     return 0
 
