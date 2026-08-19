@@ -260,3 +260,66 @@ def test_sync_wait_inside_a_running_loop_is_refused(client: Client) -> None:
 
     with pytest.raises(InvalidSpend, match="event loop"):
         asyncio.run(go())
+
+
+# ---------------------------------------------------------------------------
+# Client.from_policy -- the one-call entry point for embedders
+# ---------------------------------------------------------------------------
+
+
+def test_from_policy_yaml_string_builds_a_working_client(tmp_path: Path) -> None:
+    client = Client.from_policy(POLICY, agent_id="research-bot", state_dir=tmp_path)
+    with client.spend(merchant="api.example.com", amount="12.00") as ok:
+        assert ok.mandate
+    assert client.enforcer.audit.count() == 1
+
+
+def test_from_policy_creates_its_state_on_first_use(tmp_path: Path) -> None:
+    target = tmp_path / "nested" / "state"
+    client = Client.from_policy(POLICY, agent_id="research-bot", state_dir=target)
+    with client.spend(merchant="api.example.com", amount="1.00"):
+        pass
+    assert (target / "operator.pem").exists()
+    assert (target / "bouncer.db").exists()
+
+
+def test_from_policy_reuses_an_existing_key(tmp_path: Path) -> None:
+    """A second client must not re-key and orphan the existing audit chain."""
+    first = Client.from_policy(POLICY, agent_id="research-bot", state_dir=tmp_path)
+    second = Client.from_policy(POLICY, agent_id="research-bot", state_dir=tmp_path)
+    assert first.enforcer.key.key_id == second.enforcer.key.key_id
+
+
+def test_from_policy_accepts_a_path_and_picks_up_edits(tmp_path: Path) -> None:
+    """A Path is watched, so an operator can tighten policy without a restart."""
+    # No approval rule here: the point under test is the cap changing, and a
+    # threshold above the cap is itself a policy validation error.
+    loose = "version: 1\ncurrency: USD\nagents:\n  research-bot:\n    per_transaction_cap: 50.00\n"
+    tight = loose.replace("50.00", "5.00")
+
+    policy_file = tmp_path / "policy.yaml"
+    policy_file.write_text(loose, encoding="utf-8")
+    client = Client.from_policy(
+        policy_file, agent_id="research-bot", state_dir=tmp_path / "state"
+    )
+    with client.spend(merchant="api.example.com", amount="30.00") as ok:
+        assert ok.decision.outcome is Outcome.ALLOW
+
+    policy_file.write_text(tight, encoding="utf-8")
+    with pytest.raises(SpendDenied) as caught:
+        with client.spend(merchant="api.example.com", amount="30.00"):
+            pass  # pragma: no cover
+    assert "per-transaction cap" in str(caught.value)
+
+
+def test_from_policy_rejects_a_filename_passed_as_a_string(tmp_path: Path) -> None:
+    """The likely mistake gets a useful message, not a YAML parse error."""
+    with pytest.raises(InvalidSpend, match="looks like a filename"):
+        Client.from_policy("policy.yaml", agent_id="research-bot", state_dir=tmp_path)
+
+
+def test_from_policy_rejects_malformed_yaml(tmp_path: Path) -> None:
+    with pytest.raises(InvalidSpend, match="not valid"):
+        Client.from_policy(
+            "version: 1\nagents: {}\n", agent_id="research-bot", state_dir=tmp_path
+        )

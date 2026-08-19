@@ -24,13 +24,6 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from bouncer import ApprovalRequired, Client, SpendDenied  # noqa: E402
-from bouncer.approvals import ApprovalQueue  # noqa: E402
-from bouncer.audit import AuditLog  # noqa: E402
-from bouncer.enforcement import Enforcer  # noqa: E402
-from bouncer.keys import OperatorKey  # noqa: E402
-from bouncer.mandate import NonceStore  # noqa: E402
-from bouncer.policy import Policy  # noqa: E402
-from bouncer.sources import StaticSource  # noqa: E402
 
 # A genuine budget: 50.00 total across a rolling 30-day window, not a
 # per-transaction cap. The agent below will walk straight into it.
@@ -65,17 +58,14 @@ SHOPPING_LIST = [
 
 
 def build_client(home: Path) -> Client:
-    """Wire up an enforcer over a throwaway database and policy."""
-    key = OperatorKey.generate(home / "operator.pem")
-    audit = AuditLog(home / "agent.db", key)
-    enforcer = Enforcer(
-        source=StaticSource(Policy.from_yaml(POLICY)),
-        audit=audit,
-        key=key,
-        nonces=NonceStore(home / "agent.db", engine=audit.engine),
-        approvals=ApprovalQueue(home / "agent.db", engine=audit.engine),
-    )
-    return Client(enforcer, agent_id="research-bot")
+    """One call: key, audit log, nonce store and approval queue, all wired.
+
+    ``state_dir`` is a throwaway directory here so the example leaves nothing
+    behind. A real deployment points it at somewhere persistent -- the audit
+    log is where rolling-window ceilings are computed from, so discarding it
+    resets an agent's spent-to-date.
+    """
+    return Client.from_policy(POLICY, agent_id="research-bot", state_dir=home)
 
 
 def call_the_payment_rail(mandate: str) -> None:

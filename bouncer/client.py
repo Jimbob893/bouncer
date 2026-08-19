@@ -39,14 +39,22 @@ import asyncio
 from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager, contextmanager
 from dataclasses import dataclass
+from datetime import timedelta
 from decimal import Decimal, InvalidOperation
+from pathlib import Path
 
 from pydantic import ValidationError
 
+from .approvals import ApprovalQueue
+from .audit import AuditLog
 from .config import BouncerConfig
 from .enforcement import AuthorizationResult, Enforcer
 from .errors import BouncerError
+from .keys import OperatorKey
+from .mandate import DEFAULT_TTL, NonceStore
 from .models import Decision, Outcome, PaymentIntent
+from .policy import Policy
+from .sources import LocalFileSource, PolicySource, StaticSource
 
 __all__ = [
     "ApprovalRequired",
@@ -146,6 +154,63 @@ class Client:
         self._enforcer = enforcer
         self._agent_id = agent_id
         self._currency = currency
+
+    @classmethod
+    def from_policy(
+        cls,
+        policy: Policy | Path | str,
+        *,
+        agent_id: str,
+        state_dir: Path | str | None = None,
+        currency: str = "USD",
+        mandate_ttl: timedelta = DEFAULT_TTL,
+        webhook_url: str | None = None,
+    ) -> Client:
+        """Build a working client from a policy in one call.
+
+        This is the entry point for embedding bouncer in an application. It
+        creates the operator key on first use, opens the audit log and the
+        nonce and approval stores, and wires them together.
+
+        Args:
+            policy: A :class:`~bouncer.policy.Policy`, a :class:`Path` to a
+                YAML file, or a ``str`` of YAML source. A path is watched, so
+                edits are picked up without a restart; a string is a fixed
+                snapshot.
+            state_dir: Where the operator key and database live. Defaults to
+                ``~/.bouncer``. **This directory is the security boundary** —
+                anyone who can read the key can forge mandates and audit
+                entries.
+
+        Raises:
+            InvalidSpend: the policy argument is malformed.
+
+        Threat model: state is persistent by default and deliberately so. The
+        audit log is the evidence that a decision was made, and rolling-window
+        ceilings are computed from it — pointing this at a temporary directory
+        resets an agent's spent-to-date every run, which fails *open*.
+        """
+        home = Path(state_dir).expanduser() if state_dir is not None else Path(
+            BouncerConfig().home
+        )
+        home.mkdir(parents=True, exist_ok=True)
+
+        source = _as_source(policy)
+        key = OperatorKey.load_or_generate(home / "operator.pem")
+        audit = AuditLog(home / "bouncer.db", key)
+        return cls(
+            Enforcer(
+                source=source,
+                audit=audit,
+                key=key,
+                nonces=NonceStore(home / "bouncer.db", engine=audit.engine),
+                approvals=ApprovalQueue(home / "bouncer.db", engine=audit.engine),
+                mandate_ttl=mandate_ttl,
+                webhook_url=webhook_url,
+            ),
+            agent_id=agent_id,
+            currency=currency,
+        )
 
     @classmethod
     def open(
@@ -284,6 +349,35 @@ class Client:
             "spend(wait=True) would block the running event loop; "
             "use `async with client.aspend(..., wait=True)` instead"
         )
+
+
+def _as_source(policy: Policy | Path | str) -> PolicySource:
+    """Resolve the ``policy`` argument into a source the engine can load.
+
+    A ``Path`` becomes a watched file source, so edits take effect without a
+    restart. A ``str`` is YAML source text, and a ``Policy`` is used directly;
+    both are fixed snapshots.
+    """
+    if isinstance(policy, Policy):
+        return StaticSource(policy)
+    if isinstance(policy, Path):
+        return LocalFileSource(policy)
+
+    # The likely mistake is passing a filename as a plain string. YAML would
+    # parse "policy.yaml" as the scalar string it looks like and then fail
+    # validation somewhere confusing, so name the real problem here.
+    looks_like_a_path = "\n" not in policy and policy.strip().endswith(
+        (".yaml", ".yml")
+    )
+    if looks_like_a_path:
+        raise InvalidSpend(
+            f"policy={policy!r} looks like a filename, but a str is read as "
+            "YAML source. Pass Path(...) to load it from disk."
+        )
+    try:
+        return StaticSource(Policy.from_yaml(policy))
+    except BouncerError as exc:
+        raise InvalidSpend(f"policy is not valid: {exc}") from exc
 
 
 def _coerce_amount(value: Amount) -> Decimal:

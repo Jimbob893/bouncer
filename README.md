@@ -252,7 +252,55 @@ policy, not over it.
 
 ## Using it
 
-### As a proxy
+Three ways in, listed in the order you should reach for them.
+
+### As a library — start here
+
+Guard the spend where your agent makes it. One call to build the client, and a
+context manager around the payment:
+
+```python
+from bouncer import Client, SpendDenied
+
+client = Client.from_policy(POLICY_YAML, agent_id="research-bot")
+
+try:
+    with client.spend(merchant="api.weather.example", amount="12.00") as ok:
+        charge_the_card(mandate=ok.mandate)   # only runs if bouncer allowed it
+except SpendDenied as refused:
+    log.warning("blocked: %s", refused.decision.reason)
+```
+
+**A denial raises, and the guarded block never runs.** That is the whole reason
+this is a context manager rather than a function returning a verdict — a
+returned decision can be ignored by forgetting to check it, and an ignored
+denial is an unenforced policy.
+
+`from_policy` takes YAML source, a `Path` to a policy file (watched, so edits
+apply without a restart), or a `Policy` object. It creates the operator key on
+first use and keeps the audit log in `state_dir`, defaulting to `~/.bouncer`.
+
+Pass `wait=True` to block until a human resolves an approval; **the wait times
+out into a deny.** Agents on an event loop use `async with client.aspend(...)`.
+
+See [`examples/agent.py`](examples/agent.py) for a runnable agent that spends
+until its budget stops it.
+
+### As a local API
+
+For agents that aren't Python. Run `bouncer serve`, then:
+
+```bash
+curl -X POST localhost:8080/authorize \
+  -H 'content-type: application/json' \
+  -d '{"agent_id":"research-bot","merchant":"api.weather.example","amount":"12.00","currency":"USD"}'
+```
+
+`200` allowed (with a mandate), `403` denied, `202` awaiting a human. Add
+`?wait=true` to long-poll for an approval; **the wait times out into a deny.**
+`http://127.0.0.1:8080/docs` is an interactive console for the same endpoints.
+
+### As a proxy — plaintext HTTP only
 
 ```bash
 bouncer proxy --port 8081
@@ -264,37 +312,11 @@ An authorized request is forwarded with an `X-Bouncer-Mandate` header the
 upstream service can verify. Traffic no adapter can parse is denied and logged —
 never forwarded unexamined.
 
-### As an API
-
-```bash
-curl -X POST localhost:8080/authorize \
-  -H 'content-type: application/json' \
-  -d '{"agent_id":"research-bot","merchant":"api.weather.example","amount":"12.00","currency":"USD"}'
-```
-
-`200` allowed (with a mandate), `403` denied, `202` awaiting a human. Add
-`?wait=true` to long-poll for an approval; **the wait times out into a deny.**
-
-### As a library
-
-The client wraps a spend in a context manager. **A denial raises, and the
-guarded block never runs** — a returned verdict can be ignored by forgetting to
-check it, and an ignored denial is an unenforced policy.
-
-```python
-from bouncer import Client, SpendDenied
-
-client = Client.open(agent_id="research-bot")
-
-try:
-    with client.spend(merchant="api.weather.example", amount="12.00") as ok:
-        charge_the_card(mandate=ok.mandate)   # only runs if bouncer allowed it
-except SpendDenied as refused:
-    log.warning("blocked: %s", refused.decision.reason)
-```
-
-Pass `wait=True` to block until a human resolves an approval; **the wait times
-out into a deny.** Agents on an event loop use `async with client.aspend(...)`.
+**Know the limit before relying on this.** bouncer cannot see inside TLS, so
+CONNECT tunnels are denied by default and unenforced when you allow them. Since
+real payment APIs are HTTPS, the proxy does *not* police them today — that needs
+TLS termination, which this version does not do. Use the library or the API for
+enforcement you can count on.
 
 Spend counts against rolling windows at *authorization* time, not settlement, so
 an authorized payment you then abandon still consumes budget. That is the
