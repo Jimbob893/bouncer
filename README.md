@@ -206,6 +206,32 @@ curl -X POST localhost:8080/authorize \
 
 ### As a library
 
+The client wraps a spend in a context manager. **A denial raises, and the
+guarded block never runs** — a returned verdict can be ignored by forgetting to
+check it, and an ignored denial is an unenforced policy.
+
+```python
+from bouncer import Client, SpendDenied
+
+client = Client.open(agent_id="research-bot")
+
+try:
+    with client.spend(merchant="api.weather.example", amount="12.00") as ok:
+        charge_the_card(mandate=ok.mandate)   # only runs if bouncer allowed it
+except SpendDenied as refused:
+    log.warning("blocked: %s", refused.decision.reason)
+```
+
+Pass `wait=True` to block until a human resolves an approval; **the wait times
+out into a deny.** Agents on an event loop use `async with client.aspend(...)`.
+
+Spend counts against rolling windows at *authorization* time, not settlement, so
+an authorized payment you then abandon still consumes budget. That is the
+conservative direction: under-counting would let a retry loop outspend its
+ceiling.
+
+To evaluate without any I/O at all, call the pure engine directly:
+
 ```python
 from datetime import datetime, timezone
 from bouncer import LocalFileSource, PaymentIntent, evaluate
@@ -289,7 +315,7 @@ factor-of-a-million error.
 
 ```bash
 uv venv --python 3.12 && uv pip install -e ".[dev]"
-.venv/bin/python -m pytest          # 223 tests, ~4s
+.venv/bin/python -m pytest          # 245 tests, ~10s
 .venv/bin/python -m mypy            # strict, clean
 ```
 

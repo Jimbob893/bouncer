@@ -150,6 +150,15 @@ class Enforcer:
                 # returns the verdict and nothing else.
                 return AuthorizationResult(decision=decision, intent=intent)
 
+            # The audit row goes first, before anything that can raise. A
+            # decision that was reached but not recorded is the one outcome this
+            # module promises cannot happen, and minting or enqueueing can fail
+            # on malformed input. Recording first means a later failure leaves a
+            # logged decision with no mandate — an over-count of spend, which is
+            # the conservative direction — rather than silent, unlogged spending
+            # authority.
+            seq = self.audit.append(intent, decision).seq
+
             if decision.outcome is Outcome.ALLOW:
                 mandate, _ = issue_mandate(
                     intent,
@@ -161,8 +170,6 @@ class Enforcer:
             elif decision.outcome is Outcome.REQUIRE_APPROVAL:
                 item = self.approvals.enqueue(intent, decision)
                 pending_id = item.id
-
-            seq = self.audit.append(intent, decision).seq
 
         # Fired outside the lock: a webhook must never hold up a decision.
         if pending_id is not None:
@@ -292,6 +299,11 @@ class Enforcer:
             evaluated_at=moment,
         )
 
+        # Recorded before minting, for the same reason as in authorize().
+        seq = self.audit.append(
+            item.intent, decision, kind="approval", note=f"approval:{item.id}"
+        ).seq
+
         mandate: str | None = None
         if approve:
             mandate, _ = issue_mandate(
@@ -301,10 +313,6 @@ class Enforcer:
                 now=moment,
                 ttl=self.mandate_ttl,
             )
-
-        seq = self.audit.append(
-            item.intent, decision, kind="approval", note=f"approval:{item.id}"
-        ).seq
         return AuthorizationResult(
             decision=decision,
             intent=item.intent,

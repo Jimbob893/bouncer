@@ -77,7 +77,10 @@ class MandateClaims(BaseModel):
     agent_id: str = Field(min_length=1, max_length=128)
     merchant: str = Field(min_length=1, max_length=253)
     max_amount: Money
-    currency: str = Field(min_length=3, max_length=3)
+    # Matches PaymentIntent.currency: an ISO 4217 code (USD) or a token symbol
+    # for crypto rails (USDC, PYUSD). Capping this at 3 made every allow on a
+    # token-denominated policy raise instead of minting.
+    currency: str = Field(min_length=3, max_length=12)
     issued_at: datetime
     expires_at: datetime
     nonce: str = Field(min_length=16, max_length=64)
