@@ -309,13 +309,13 @@ def run(home: Path) -> int:
     except Exception as exc:  # RoleMismatch
         wrong = exc
     print(f"      {DIM('$ bouncer approve ' + pending.pending_id + ' --role engineering')}")
-    print(f"      {RED(f"{CROSS} refused")}  {DIM(str(wrong))}")
+    print(f"      {RED(f'{CROSS} refused')}  {DIM(str(wrong))}")
 
     print(f"      {DIM('$ bouncer approve ' + pending.pending_id + ' --role finance')}")
     approved = enforcer.resolve(
         pending.pending_id, role="finance", approve=True, note="ok for Q1 research"
     )
-    print(f"      {GREEN(f"{TICK} approved")}  {DIM(approved.decision.reason)}")
+    print(f"      {GREEN(f'{TICK} approved')}  {DIM(approved.decision.reason)}")
 
     # -- 5. trips the rolling window --------------------------------------
     attempt(
@@ -337,10 +337,10 @@ def run(home: Path) -> int:
     print(f"    {CYAN('$12.00')} to api.weather.example  {DIM('(same mandate, second use)')}")
     try:
         verify_mandate(allowed.mandate, key, now=clock.now, nonce_store=nonces)
-        print(f"    {RED(f"{CROSS} BUG: replay succeeded")}")
+        print(f"    {RED(f'{CROSS} BUG: replay succeeded')}")
         return 1
     except MandateError as exc:
-        print(f"    {RED(f"{CROSS} REJECTED")}  {DIM(type(exc).__name__)}")
+        print(f"    {RED(f'{CROSS} REJECTED')}  {DIM(type(exc).__name__)}")
         print(f"    {DIM(ELBOW)} {exc}")
 
     # -- the audit log ----------------------------------------------------
@@ -364,7 +364,7 @@ def run(home: Path) -> int:
     result = audit.verify()
     print()
     print(f"  {DIM('$ bouncer verify')}")
-    print(f"  {GREEN(f"{TICK} " + result.describe())}")
+    print(f"  {GREEN(f'{TICK} ' + result.describe())}")
 
     # Now break it, to show the evidence is real. Pick a row that really was a
     # denial, so flipping it to ALLOW is a genuine change rather than a no-op.
@@ -381,7 +381,7 @@ def run(home: Path) -> int:
         )
     broken = audit.verify()
     print(f"  {DIM('$ bouncer verify')}")
-    print(f"  {RED(f"{CROSS} " + broken.describe())}")
+    print(f"  {RED(f'{CROSS} ' + broken.describe())}")
     if broken.ok:
         print(f"  {RED('BUG: tampering went undetected')}")
         return 1
