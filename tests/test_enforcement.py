@@ -371,3 +371,79 @@ def test_unparseable_and_tunnel_denials_never_count_as_spend(
         "research-bot", since=NOW - timedelta(days=30)
     )
     assert history == []
+
+
+# ---------------------------------------------------------------------------
+# a token-denominated policy must mint, not crash
+# ---------------------------------------------------------------------------
+
+TOKEN_POLICY = """
+version: 1
+currency: USDC
+agents:
+  research-bot:
+    per_transaction_cap: 100.00
+"""
+
+
+def test_token_currency_mints_a_usable_mandate(
+    tmp_path: Path, operator_key: OperatorKey
+) -> None:
+    """MandateClaims.currency was capped at 3 characters.
+
+    PaymentIntent and Policy both accept token symbols up to 12, so a USDC
+    policy evaluated to ALLOW and then raised an uncaught ValidationError out
+    of issue_mandate -- a traceback from the CLI and a 500 from the API.
+    """
+    from bouncer.mandate import verify_mandate
+
+    enforcer, clock = build(tmp_path, operator_key, TOKEN_POLICY)
+    result = enforcer.authorize(
+        PaymentIntent(
+            agent_id="research-bot",
+            merchant="api.example.com",
+            amount=Decimal("5.00"),
+            currency="USDC",
+        )
+    )
+
+    assert result.decision.outcome is Outcome.ALLOW
+    assert result.mandate is not None
+
+    claims = verify_mandate(
+        result.mandate,
+        operator_key,
+        now=clock.now,
+        expected_merchant="api.example.com",
+        amount=Decimal("5.00"),
+    )
+    assert claims.currency == "USDC"
+
+
+# ---------------------------------------------------------------------------
+# every decision reaches the audit log, including the failing branches
+# ---------------------------------------------------------------------------
+
+
+def test_a_decision_is_logged_even_when_minting_fails(
+    tmp_path: Path, operator_key: OperatorKey, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Minting used to run before the audit append.
+
+    Anything that raised between deciding and recording produced spending
+    authority -- or a refusal -- that left no trace at all, which is the one
+    outcome the enforcement core promises cannot happen.
+    """
+    enforcer, _ = build(tmp_path, operator_key, SIMPLE)
+    before = enforcer.audit.count()
+
+    def explode(*args: object, **kwargs: object) -> tuple[str, object]:
+        raise RuntimeError("mint failed")
+
+    monkeypatch.setattr("bouncer.enforcement.issue_mandate", explode)
+
+    with pytest.raises(RuntimeError):
+        enforcer.authorize(intent(amount=Decimal("10.00")))
+
+    assert enforcer.audit.count() == before + 1, "the decision must still be logged"
+    assert enforcer.audit.verify().ok, "the chain must stay intact"
