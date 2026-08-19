@@ -2,6 +2,11 @@
 
 **A policy enforcement point for agent spending.**
 
+[![CI](https://github.com/Jimbob893/bouncer/actions/workflows/ci.yml/badge.svg)](https://github.com/Jimbob893/bouncer/actions/workflows/ci.yml)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org/downloads/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+[![Checked with mypy](https://img.shields.io/badge/mypy-strict-blue)](http://mypy-lang.org/)
+
 bouncer sits between an AI agent and any payment rail, blocks transactions that
 violate a declarative policy, and writes a tamper-evident, signed audit log of
 every decision.

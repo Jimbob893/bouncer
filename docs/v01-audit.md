@@ -2,19 +2,35 @@
 
 Assessment of the repository as it stands against the seven-item v0.1 scope.
 
-**Verified state:** 223 tests (222 pass, 1 skipped on Windows), `mypy --strict`
-clean across 35 source files, CLI and API both run. 7 files have uncommitted
-working-tree changes.
+**Verified state:** 247 tests (246 pass, 1 skipped on Windows), `mypy --strict`
+clean across 37 source files, CLI and API both run.
+
+---
+
+## Resolved since this audit was written
+
+The findings below are kept as written, because the reasoning is the useful
+part. What has changed:
+
+| Finding | Status |
+| --- | --- |
+| §3.1 — crash on currencies longer than 3 characters | **Fixed.** `MandateClaims.currency` now matches `PaymentIntent.currency` (3–12). |
+| §3.1 — decision reached but never logged | **Fixed.** `audit.append()` now runs before minting in both `authorize()` and `_finalize_locked()`, so a later failure cannot erase the record. |
+| §4.1 — client library missing entirely | **Built.** `bouncer/client.py` — `Client.spend()` is a context manager where a denial raises and the guarded block never runs. 18 tests. |
+| §3.8 — uncommitted working tree | **Committed.** History is now clean. |
+| Build brief committed at repo root | **Removed.** It was the internal spec, not documentation of the result. |
+
+Still open: the four decisions in §7, item 7 (the toy agent), and item 1's
+`AuditEntry` model. §5's scope deletions are untouched pending §7.
 
 ---
 
 ## 0. Read this first: the repo was built to a different spec
 
-`bouncer project blueprint.md` (committed, and clearly the document this code
-was written against) specifies **six milestones M1-M6**. The v0.1 scope in the
-current task is a **different, narrower seven-item list**. They agree on most
-things and contradict each other on three, and one of those contradictions is
-expensive.
+The build brief this code was originally written against (since removed from the
+repo) specifies **six milestones M1-M6**. The v0.1 scope is a **different,
+narrower seven-item list**. They agree on most things and contradict each other
+on three, and one of those contradictions is expensive.
 
 | Topic | Blueprint (what was built) | v0.1 scope (what is asked) | Cost to reconcile |
 | --- | --- | --- | --- |
@@ -36,7 +52,7 @@ that change the shape of the codebase in section 7 rather than guessing.
 | 3 | Audit log: append-only JSONL, hash-chained, ed25519, `bouncer verify` | Works, wrong storage medium |
 | 4 | Approval queue in SQLite, by approver_role | Works, role unconstrained |
 | 5 | FastAPI: `POST /authorize`, `POST /approvals/{id}/resolve` | Half - resolve endpoint absent |
-| 6 | Client lib: context manager wrapping an agent's spend call | **Missing entirely** |
+| 6 | Client lib: context manager wrapping an agent's spend call | Done - see "Resolved" above |
 | 7 | Example: toy agent, $50 budget, overspends, blocked | Adjacent thing exists |
 
 ---
@@ -402,18 +418,18 @@ suite green. Items marked LOCKED are blocked on a section 7 decision.
 
 ### Phase 0 - clean baseline
 
-- [ ] Commit the 7 uncommitted working-tree changes so v0.1 work starts from a
+- [x] Commit the 7 uncommitted working-tree changes so v0.1 work starts from a
       known state
-- [ ] Confirm baseline: `pytest` green, `mypy --strict` clean
+- [x] Confirm baseline: `pytest` green, `mypy --strict` clean
 
 ### Phase 1 - correctness (no scope change, do this regardless of section 7)
 
-- [ ] Fix the currency-width crash (3.1): widen `MandateClaims.currency` to
+- [x] Fix the currency-width crash (3.1): widen `MandateClaims.currency` to
       match `PaymentIntent.currency` (3-12)
-- [ ] Add a regression test issuing and verifying a `USDC` mandate end to end
-- [ ] Reorder `Enforcer.authorize()` so the audit row is written before any
+- [x] Add a regression test issuing and verifying a `USDC` mandate end to end
+- [x] Reorder `Enforcer.authorize()` so the audit row is written before any
       branch that can raise, honouring "every branch ends in an audit entry"
-- [ ] Add a test asserting a decision is logged even when mandate minting fails
+- [x] Add a test asserting a decision is logged even when mandate minting fails
 - [ ] Remove the dead `count` assignment at `cli.py:298`
 
 ### Phase 2 - close the item-5 gap
@@ -426,15 +442,15 @@ suite green. Items marked LOCKED are blocked on a section 7 decision.
 
 ### Phase 3 - item 6, the client library (largest new build)
 
-- [ ] Decide raise-vs-return and in-process-vs-HTTP (4.1)
-- [ ] Add `bouncer/client.py` with a `spend()` context manager wrapping
+- [x] Decide raise-vs-return and in-process-vs-HTTP (4.1)
+- [x] Add `bouncer/client.py` with a `spend()` context manager wrapping
       `Enforcer.authorize()`
-- [ ] Handle all three outcomes: allow yields the mandate, deny raises,
+- [x] Handle all three outcomes: allow yields the mandate, deny raises,
       `REQUIRE_APPROVAL` either blocks to the timeout or raises immediately
       depending on a `wait=` flag
-- [ ] Guarantee the context manager cannot silently swallow a denial
-- [ ] Export it from `bouncer/__init__.py`
-- [ ] Tests for each outcome, including the approval-timeout-denies path
+- [x] Guarantee the context manager cannot silently swallow a denial
+- [x] Export it from `bouncer/__init__.py`
+- [x] Tests for each outcome, including the approval-timeout-denies path
 
 ### Phase 4 - item 7, the toy agent
 
