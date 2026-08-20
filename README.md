@@ -9,9 +9,70 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Checked with mypy](https://img.shields.io/badge/mypy-strict-blue)](http://mypy-lang.org/)
 
-bouncer sits between an AI agent and any payment rail, blocks transactions that
-violate a declarative policy, and writes a tamper-evident, signed audit log of
-every decision.
+Your agent has your card. Agents get stuck in loops, misread prices, and retry
+forever. bouncer checks every payment against rules you wrote and refuses the
+ones that break them — then signs a record of what it decided.
+
+## What it does
+
+Wrap wherever your code spends money. **A refusal raises, so the payment line
+never runs:**
+
+```python
+from bouncer import Client, SpendDenied
+
+client = Client.from_policy(POLICY, agent_id="shopping-agent")
+
+try:
+    with client.spend(merchant="api.scraper.example", amount="40.00"):
+        charge_the_card()          # does not run if the rules say no
+except SpendDenied as refused:
+    log.warning("blocked: %s", refused.decision.reason)
+```
+
+The rules are two lines of YAML:
+
+```yaml
+agents:
+  shopping-agent:
+    per_transaction_cap: 50.00      # never more than $50 at once
+    rolling_windows:
+      - amount: 100.00              # never more than $100
+        window: 30d                 # in any 30-day period
+```
+
+Here is the same stuck agent run twice — once without bouncer, once with it.
+Nothing else differs ([`examples/with_and_without.py`](examples/with_and_without.py)):
+
+```
+RUN 1  -  the agent holds the card. no policy layer.
+  agent: I need web scraping credits, buying $40.00
+      CHARGED $40.00. balance now $960.00
+  ... six more times, unopposed ...
+  RESULT: spent $320.00 in a single loop.
+  Nothing refused it. You find out when the statement arrives.
+
+RUN 2  -  same agent, same bug. bouncer checks each payment.
+  agent: I need web scraping credits, buying $40.00
+      CHARGED $40.00. balance now $960.00
+  agent: I need web scraping credits, buying $40.00
+      CHARGED $40.00. balance now $920.00
+  agent: I need web scraping credits, buying $40.00
+      REFUSED. would bring spend over the last 30d to 120.00,
+               above the 100.00 ceiling (already spent 80.00)
+      the charge never happened. balance still $920.00
+  RESULT: spent $80.00, then stopped.
+  chain intact: 3 entries verified, head 0ed7b520b9de3d8c...
+```
+
+**$240 the agent could not spend.** That difference is the entire product.
+
+```bash
+pip install agent-bouncer
+bouncer demo
+```
+
+---
 
 ```mermaid
 flowchart LR
@@ -119,13 +180,23 @@ bouncer demo
 It builds its own key, policy and database in a temporary directory and removes
 them afterwards, so it never touches or spends against your `~/.bouncer`.
 
-A second example, a toy agent that spends through a $50 budget until it is
-stopped, lives in the repository:
+More examples live in the repository:
 
 ```bash
 git clone https://github.com/nmaltese13/bouncer.git && cd bouncer
-python examples/agent.py
+
+python examples/with_and_without.py  # the two runs quoted at the top of this file
+python examples/agent.py             # a toy agent spending through a $50 budget
+python examples/stripe_agent.py      # bouncer in front of Stripe, reading its wire format
 ```
+
+`stripe_agent.py` is the reference integration. The agent builds the exact form
+body the Stripe SDK sends, the `stripe` adapter reads the amount out of it, and
+only an allowed payment is forwarded — one approved, one blocked over the cap,
+and one refused outright for carrying a live-mode key. Set
+`STRIPE_API_KEY=sk_test_...` and the approved one is really created in your
+Stripe test account; without a key it runs every decision and skips the network
+call. **Test mode only** — the adapter refuses live keys on purpose.
 
 ---
 
@@ -153,8 +224,15 @@ more than it does.
 - **CLI roles are not authenticated.** `--role finance` is an assertion by
   whoever has shell access, not a login. v1 assumes a single trusted operator
   on a trusted machine. Anyone who can run the CLI can approve anything.
-- The operator signing key proves the log was not altered _after_ writing. It
-  proves nothing about a compromised operator at write time.
+- **The writer holds the signing key.** The process that appends the audit log
+  is the same process that signs it, so a signature proves a row came from
+  something holding the key — not that the row is honest. Anyone who can read
+  `operator.pem` can author a complete, correctly-signed history that never
+  happened, and `bouncer verify` will call it intact, because it is. The log
+  defends against later tampering, not against a bad writer at write time.
+  Anchoring the head hash externally is the only mitigation that reaches past
+  this; [SECURITY.md](SECURITY.md#key-management-the-writer-holds-the-signing-key)
+  sets out the paths out and why none are built yet.
 - Nothing here has been security audited.
 
 ### Three limits the implementation adds

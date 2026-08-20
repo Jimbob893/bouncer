@@ -99,6 +99,58 @@ These are documented properties, not defects. Reporting them is not useful.
 - **Unenforced CONNECT tunnels.** With `--allow-connect`, traffic inside a TLS
   tunnel is explicitly not policed.
 
+## Key management: the writer holds the signing key
+
+This is the most important limitation in the project, so it gets its own
+section rather than a bullet.
+
+**The process that writes the audit log is the same process that signs it.**
+`Enforcer` loads `operator.pem` at startup and signs every row it appends. There
+is no separation between the component that makes a decision and the component
+that attests to it.
+
+What that means precisely:
+
+- A signature proves a row was produced by *something holding the key*. It does
+  **not** prove the row is honest.
+- Anyone who can read `operator.pem` can author a complete, internally
+  consistent, correctly-signed history that never happened — and `bouncer
+  verify` will report it as intact, because it *is* intact. Verification proves
+  the log was not altered after writing; it cannot reach behind the writer.
+- Compromise of the host is therefore compromise of the evidence. The audit log
+  defends against later tampering, not against a bad writer at write time.
+
+Anyone evaluating this as an audit control should understand that the security
+of the whole log reduces to the security of one file on one machine.
+
+### What reduces the exposure today
+
+- **Anchor the head hash externally.** `bouncer verify` prints the head; record
+  it somewhere bouncer cannot write, and pass it back with `--expect-head`. A
+  forged history will not match an anchor taken before the forgery. This is the
+  only mitigation that works against a writer who already holds the key, and it
+  is worth automating into whatever you already trust — a monitoring system, a
+  second host, a chat channel, a printout.
+- **Protect the key file.** `0600` on POSIX. On Windows the mode is advisory and
+  the key inherits the directory ACL — see the hardening checklist.
+- **Keep the blast radius small.** Loopback binding, egress control, and a host
+  that runs bouncer and little else.
+
+### The paths out, and why they are not built
+
+Named so the gap is a decision rather than an oversight:
+
+| Approach | What it buys | Why not yet |
+| --- | --- | --- |
+| **Hardware-backed key** (TPM, HSM, YubiKey) | The key cannot be copied off the host. An attacker with code execution can still *use* it as a signing oracle, but cannot walk away with the ability to forge history offline or after eviction. | Cheapest real improvement and the most likely next step. It needs a signing interface behind `OperatorKey`, which the class is already shaped for. |
+| **Separate signing service** | The enforcer submits rows to a signer it cannot read the key from. Compromising the decision path no longer yields forging power. | Adds a second process and an IPC boundary to a tool whose whole premise is a single local process. Worth it only alongside a multi-host deployment. |
+| **Append to an external collector** | Rows leave the host as they are written, so a later local forgery contradicts a copy the attacker never controlled. | This is the tail-truncation fix as well, and it is the strongest option. It requires a network dependency in the decision path, which v1 deliberately does not have. |
+| **Transparency-log anchoring** | Third parties can detect a rewritten history. | Meaningful only with an external witness, which reduces to the option above. |
+
+None of these are hard to build. They are absent because v1 assumes a single
+trusted operator on a trusted machine, and adding them without that assumption
+changing would be security theatre.
+
 ## Limits of the guarantee
 
 Stated plainly, because security software that overclaims is worse than none:
