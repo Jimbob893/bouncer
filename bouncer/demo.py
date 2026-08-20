@@ -417,7 +417,7 @@ def run(home: Path) -> int:
     print(
         f"  {DIM(f'An attacker edits row {victim} directly in SQLite, flipping a blocked')}"
     )
-    print(f"  {DIM('payment to an authorized one{ELLIPSIS}')}")
+    print(f"  {DIM('payment to an authorized one' + ELLIPSIS)}")
     with audit.engine.begin() as connection:
         connection.execute(
             text("UPDATE audit_entries SET outcome='ALLOW' WHERE seq=:seq"),

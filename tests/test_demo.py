@@ -7,6 +7,7 @@ attempts still produces the outcome it claims to.
 
 from __future__ import annotations
 
+import re
 import runpy
 import sys
 from pathlib import Path
@@ -96,3 +97,15 @@ def test_sample_policy_is_valid() -> None:
     policy = Policy.from_yaml((EXAMPLES / "policy.yaml").read_text())
     assert set(policy.agents) == {"research-bot", "procurement-bot"}
     assert policy.agents["research-bot"].approval_required_above is not None
+
+
+def test_no_unsubstituted_placeholders_leak_into_the_output(demo_output: str) -> None:
+    """A `{NAME}` inside a nested string is literal text, not a substitution.
+
+    The glyph constants are interpolated into f-strings, but one sat inside a
+    quoted string *within* an f-string expression, so `{ELLIPSIS}` printed
+    verbatim in the demo's closing lines. The demo is the project's shop
+    window; garbage in it is worse than a plain ASCII fallback.
+    """
+    leaked = re.findall(r"\{[A-Z_]{2,}\}", demo_output)
+    assert not leaked, f"unsubstituted placeholders in demo output: {sorted(set(leaked))}"
