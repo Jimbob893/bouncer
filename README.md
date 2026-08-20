@@ -387,6 +387,11 @@ bouncer deny    <id> --role finance
 
 Approve and deny run the identical role check — there is no asymmetric
 authority where vetoing is easier than approving. Resolution is once-only.
+
+**An approval is re-checked against the policy in force when it is granted**,
+not the one that queued it. If the budget was consumed while the request waited,
+or the merchant was denylisted, or the policy stopped loading, the grant is
+refused and logged. Approvers exercise judgment inside policy, never over it.
 Set `BOUNCER_WEBHOOK_URL` to get a POST when something lands in the queue; a
 webhook failure never changes an outcome.
 

@@ -274,11 +274,41 @@ class Enforcer:
         note: str | None,
         timed_out: bool = False,
     ) -> AuthorizationResult:
+        # Threat model: a grant is re-evaluated against the policy in force
+        # *now*, not the one that queued it. Policy is otherwise checked only
+        # when an item enters the queue, so anything that changed while it
+        # waited — budget consumed by other spending, a merchant added to the
+        # denylist, the policy file becoming unreadable — would be invisible at
+        # the moment authority is actually handed out. That is a fail-open, and
+        # it contradicts the rule that approvers exercise judgment *inside*
+        # policy rather than over it.
+        #
+        # REQUIRE_APPROVAL is the expected verdict here: it is why the item was
+        # queued, and the human has now supplied the judgment it was waiting
+        # for. A DENY is a hard rule, and no approval overrides one.
+        loaded = self.source.load()
+        superseded: Decision | None = None
+        if approve and not timed_out:
+            history = self.audit.spend_history(
+                item.intent.agent_id,
+                since=moment - self._lookback_for(loaded, item.intent.agent_id),
+            )
+            current = evaluate(item.intent, loaded, history, now=moment)
+            if current.outcome is Outcome.DENY:
+                superseded = current
+                approve = False
+
         if timed_out:
             reason_code = ReasonCode.APPROVAL_TIMEOUT
             reason = (
                 f"no {item.required_role!r} approval arrived before the timeout; "
                 "bouncer denies on timeout"
+            )
+        elif superseded is not None:
+            reason_code = superseded.reason_code
+            reason = (
+                f"approval by role {item.resolved_by_role!r} refused: policy no "
+                f"longer permits this transaction ({superseded.reason})"
             )
         elif approve:
             reason_code = ReasonCode.APPROVAL_GRANTED
@@ -293,9 +323,13 @@ class Enforcer:
             outcome=Outcome.ALLOW if approve else Outcome.DENY,
             reason_code=reason_code,
             reason=reason,
-            rule=item.decision.rule,
+            rule=superseded.rule if superseded is not None else item.decision.rule,
             approver_role=item.required_role,
-            policy_hash=item.decision.policy_hash,
+            # The policy in force at the moment authority was granted or
+            # refused, not the one that queued the item. Recording the stale
+            # hash would attribute the outcome to a policy that may no longer
+            # exist, which is exactly what the audit log exists to prevent.
+            policy_hash=loaded.policy_hash,
             evaluated_at=moment,
         )
 

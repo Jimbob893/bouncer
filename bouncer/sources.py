@@ -11,13 +11,14 @@ load policy must never be indistinguishable from loading a permissive one.
 
 from __future__ import annotations
 
+import hashlib
 import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol, runtime_checkable
 
 from .errors import PolicyError
-from .policy import Policy, load_policy_file
+from .policy import Policy
 
 __all__ = ["LoadedPolicy", "LocalFileSource", "PolicySource", "StaticSource"]
 
@@ -65,15 +66,15 @@ class PolicySource(Protocol):
 class LocalFileSource:
     """Loads policy from a YAML file on the local filesystem.
 
-    The only source shipped in v1. Results are cached on the file's
-    (mtime, size) so the proxy can reload per request without re-parsing on
-    every call, while still picking up edits without a restart.
+    The only source shipped in v1. Results are cached on a hash of the file's
+    contents, so the proxy can reload per request without re-parsing on every
+    call while still picking up any edit without a restart.
     """
 
     def __init__(self, path: str | Path) -> None:
         self._path = Path(path).expanduser()
         self._lock = threading.Lock()
-        self._stamp: tuple[float, int] | None = None
+        self._digest: str | None = None
         self._cached: LoadedPolicy | None = None
 
     @property
@@ -85,30 +86,47 @@ class LocalFileSource:
         return self._path
 
     def load(self) -> LoadedPolicy:
+        """Read and parse the policy, reusing the last parse when unchanged.
+
+        Threat model: the cache is keyed on a hash of the file's *contents*, not
+        on ``(mtime, size)``. An edit that preserves both — a same-length change
+        such as a cap going from ``90.00`` to ``10.00``, or any restore that
+        keeps timestamps, as ``rsync --times``, backup restores and
+        configuration management all do — would otherwise leave the engine
+        enforcing the previous policy indefinitely. Since the stale copy is
+        typically the *looser* one, that fails open.
+
+        Reading the file every time is cheap; parsing and validating the YAML is
+        the expensive part, and that is what the cache still skips.
+        """
         try:
-            stat = self._path.stat()
+            raw = self._path.read_bytes()
         except OSError as exc:
             return LoadedPolicy.failed(
                 f"policy file unavailable at {self._path}: {exc}", self.origin
             )
-        stamp = (stat.st_mtime, stat.st_size)
+        digest = hashlib.sha256(raw).hexdigest()
         with self._lock:
-            if self._cached is not None and self._stamp == stamp:
+            if self._cached is not None and self._digest == digest:
                 return self._cached
             try:
                 loaded = LoadedPolicy(
-                    policy=load_policy_file(self._path), origin=self.origin
+                    policy=Policy.from_yaml(raw.decode("utf-8")), origin=self.origin
+                )
+            except UnicodeDecodeError as exc:
+                loaded = LoadedPolicy.failed(
+                    f"policy at {self._path} is not valid UTF-8: {exc}", self.origin
                 )
             except PolicyError as exc:
                 loaded = LoadedPolicy.failed(str(exc), self.origin)
-            self._stamp = stamp
+            self._digest = digest
             self._cached = loaded
             return loaded
 
     def invalidate(self) -> None:
-        """Drop the cache, forcing a re-read on the next load."""
+        """Drop the cache, forcing a re-parse on the next load."""
         with self._lock:
-            self._stamp = None
+            self._digest = None
             self._cached = None
 
 

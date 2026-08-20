@@ -295,7 +295,7 @@ def cmd_export(args: argparse.Namespace, out: TextIO) -> int:
         count = export_jsonl(log, args.output)
         out.write(f"exported {count} entries to {args.output}\n")
     else:
-        count = export_jsonl(log, sys.stdout)
+        export_jsonl(log, sys.stdout)
     return EXIT_OK
 
 

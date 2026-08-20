@@ -21,7 +21,8 @@ from bouncer.keys import OperatorKey
 from bouncer.mandate import NonceStore
 from bouncer.models import Outcome, PaymentIntent
 from bouncer.policy import Policy
-from bouncer.sources import StaticSource
+from bouncer.models import ReasonCode
+from bouncer.sources import LoadedPolicy, StaticSource
 
 from .conftest import NOW, intent
 
@@ -32,6 +33,23 @@ class MovableClock:
 
     def __call__(self) -> datetime:
         return self.now
+
+
+
+class MutableSource:
+    """A policy source an operator can change mid-test."""
+
+    def __init__(self, policy: Policy | None) -> None:
+        self.policy = policy
+
+    @property
+    def origin(self) -> str:
+        return "mutable"
+
+    def load(self) -> LoadedPolicy:
+        if self.policy is None:
+            return LoadedPolicy.failed("policy is not valid YAML", self.origin)
+        return LoadedPolicy(policy=self.policy, origin=self.origin)
 
 
 def build(tmp_path: Path, key: OperatorKey, policy: str) -> tuple[Enforcer, MovableClock]:
@@ -447,3 +465,146 @@ def test_a_decision_is_logged_even_when_minting_fails(
 
     assert enforcer.audit.count() == before + 1, "the decision must still be logged"
     assert enforcer.audit.verify().ok, "the chain must stay intact"
+
+
+# ---------------------------------------------------------------------------
+# an approval is re-checked against the policy in force when it is granted
+# ---------------------------------------------------------------------------
+
+APPROVAL_POLICY = """
+version: 1
+currency: USD
+agents:
+  research-bot:
+    per_transaction_cap: 70.00
+    rolling_windows:
+      - amount: 100.00
+        window: 30d
+    approval_required_above:
+      amount: 50.00
+      approver_role: finance
+"""
+
+
+def queue_and_spend(enforcer: Enforcer) -> str:
+    """Park a 60.00 approval, then commit 50.00 while it waits."""
+    parked = enforcer.authorize(intent(intent_id="parked", amount=Decimal("60.00")))
+    assert parked.decision.outcome is Outcome.REQUIRE_APPROVAL
+    committed = enforcer.authorize(intent(intent_id="other", amount=Decimal("50.00")))
+    assert committed.decision.outcome is Outcome.ALLOW
+    assert parked.pending_id is not None
+    return parked.pending_id
+
+
+def test_approval_cannot_exceed_a_ceiling_consumed_while_it_waited(
+    tmp_path: Path, operator_key: OperatorKey
+) -> None:
+    """Granting used to skip evaluation entirely, so a budget spent in the
+    meantime was invisible at the moment authority was handed out."""
+    enforcer, _ = build(tmp_path, operator_key, APPROVAL_POLICY)
+    item_id = queue_and_spend(enforcer)
+
+    result = enforcer.resolve(item_id, role="finance", approve=True)
+
+    assert result.decision.outcome is Outcome.DENY
+    assert result.decision.reason_code is ReasonCode.OVER_ROLLING_WINDOW
+    assert result.mandate is None
+
+    history = enforcer.audit.spend_history("research-bot", since=NOW - timedelta(days=30))
+    assert sum(record.amount for record in history) == Decimal("50.00")
+
+
+def test_approval_cannot_override_a_denylist_added_while_it_waited(
+    tmp_path: Path, operator_key: OperatorKey
+) -> None:
+    audit = AuditLog(tmp_path / "e.db", operator_key)
+    source = MutableSource(Policy.from_yaml(APPROVAL_POLICY))
+    enforcer = Enforcer(
+        source=source,
+        audit=audit,
+        key=operator_key,
+        nonces=NonceStore(tmp_path / "e.db", engine=audit.engine),
+        approvals=ApprovalQueue(tmp_path / "e.db", engine=audit.engine),
+        clock=MovableClock(NOW),
+    )
+    parked = enforcer.authorize(intent(amount=Decimal("60.00")))
+    assert parked.pending_id is not None
+
+    source.policy = Policy.from_yaml(
+        APPROVAL_POLICY.replace(
+            "    rolling_windows:",
+            '    merchants:\n      deny: ["api.example.com"]\n    rolling_windows:',
+        )
+    )
+
+    result = enforcer.resolve(parked.pending_id, role="finance", approve=True)
+    assert result.decision.outcome is Outcome.DENY
+    assert result.decision.reason_code is ReasonCode.MERCHANT_DENIED
+    assert result.mandate is None
+
+
+def test_approval_is_refused_when_policy_stops_loading(
+    tmp_path: Path, operator_key: OperatorKey
+) -> None:
+    """A malformed policy denies everything -- including parked approvals."""
+    audit = AuditLog(tmp_path / "e.db", operator_key)
+    source = MutableSource(Policy.from_yaml(APPROVAL_POLICY))
+    enforcer = Enforcer(
+        source=source,
+        audit=audit,
+        key=operator_key,
+        nonces=NonceStore(tmp_path / "e.db", engine=audit.engine),
+        approvals=ApprovalQueue(tmp_path / "e.db", engine=audit.engine),
+        clock=MovableClock(NOW),
+    )
+    parked = enforcer.authorize(intent(amount=Decimal("60.00")))
+    assert parked.pending_id is not None
+
+    source.policy = None  # the file became unreadable
+
+    result = enforcer.resolve(parked.pending_id, role="finance", approve=True)
+    assert result.decision.outcome is Outcome.DENY
+    assert result.mandate is None
+
+
+def test_a_still_valid_approval_is_granted(
+    tmp_path: Path, operator_key: OperatorKey
+) -> None:
+    """The re-check must not break the ordinary path."""
+    enforcer, _ = build(tmp_path, operator_key, APPROVAL_POLICY)
+    parked = enforcer.authorize(intent(amount=Decimal("60.00")))
+    assert parked.pending_id is not None
+
+    result = enforcer.resolve(parked.pending_id, role="finance", approve=True)
+    assert result.decision.outcome is Outcome.ALLOW
+    assert result.decision.reason_code is ReasonCode.APPROVAL_GRANTED
+    assert result.mandate is not None
+
+
+def test_the_approval_row_records_the_policy_in_force_now(
+    tmp_path: Path, operator_key: OperatorKey
+) -> None:
+    """Recording the queued hash would attribute the grant to a stale policy."""
+    audit = AuditLog(tmp_path / "e.db", operator_key)
+    source = MutableSource(Policy.from_yaml(APPROVAL_POLICY))
+    enforcer = Enforcer(
+        source=source,
+        audit=audit,
+        key=operator_key,
+        nonces=NonceStore(tmp_path / "e.db", engine=audit.engine),
+        approvals=ApprovalQueue(tmp_path / "e.db", engine=audit.engine),
+        clock=MovableClock(NOW),
+    )
+    parked = enforcer.authorize(intent(amount=Decimal("60.00")))
+    assert parked.pending_id is not None
+    queued_hash = parked.decision.policy_hash
+
+    # Loosen an unrelated rule so the hash changes but the grant still passes.
+    source.policy = Policy.from_yaml(
+        APPROVAL_POLICY.replace("per_transaction_cap: 70.00", "per_transaction_cap: 65.00")
+    )
+    result = enforcer.resolve(parked.pending_id, role="finance", approve=True)
+
+    assert result.decision.outcome is Outcome.ALLOW
+    assert result.decision.policy_hash != queued_hash
+    assert result.decision.policy_hash == source.load().policy_hash

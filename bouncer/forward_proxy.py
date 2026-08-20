@@ -230,7 +230,12 @@ class ProxyServer:
             raise ProxyError(f"unsupported scheme {split.scheme!r} in proxy request")
 
         body = await _read_body(reader, headers)
-        result = self._authorize(method, target, headers, body, agent_id)
+        # Off the event loop: _authorize takes the decision lock and
+        # commits under synchronous=FULL, so running it inline would
+        # stall every other proxied connection behind one fsync.
+        result = await asyncio.to_thread(
+            self._authorize, method, target, headers, body, agent_id
+        )
 
         if result.decision.outcome is not Outcome.ALLOW:
             logger.info(
@@ -342,7 +347,9 @@ class ProxyServer:
         port = int(raw_port) if raw_port.isdigit() else 443
 
         if not self.allow_connect:
-            result = self.enforcer.authorize_tunnel(host, agent_id)
+            result = await asyncio.to_thread(
+                self.enforcer.authorize_tunnel, host, agent_id
+            )
             logger.info("BLOCK CONNECT %s (tunnels disabled)", target)
             await self._write(writer, _blocked_response(
                 _json_error(
@@ -361,7 +368,9 @@ class ProxyServer:
             ))
             return
 
-        result = self.enforcer.authorize_tunnel(host, agent_id)
+        result = await asyncio.to_thread(
+            self.enforcer.authorize_tunnel, host, agent_id
+        )
         if result.decision.outcome is not Outcome.ALLOW:
             logger.info("BLOCK CONNECT %s (%s)", target, result.decision.reason_code.value)
             await self._write(writer, _blocked_response(

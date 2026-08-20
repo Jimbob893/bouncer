@@ -19,6 +19,10 @@ part. What has changed:
 | §4.1 — client library missing entirely | **Built.** `bouncer/client.py` — `Client.spend()` is a context manager where a denial raises and the guarded block never runs. 18 tests. |
 | §3.8 — uncommitted working tree | **Committed.** History is now clean. |
 | Build brief committed at repo root | **Removed.** It was the internal spec, not documentation of the result. |
+| Approval grants never re-evaluated policy | **Fixed.** A grant now re-runs `evaluate()` against current policy and spend history; a hard `DENY` overrides the approver, and the audit row records the policy hash in force at grant time. |
+| `LocalFileSource` cached on `(mtime, size)` | **Fixed.** Keyed on a content hash, so a same-size edit with a preserved timestamp can no longer leave a stale, looser policy in force. |
+| §3.7 — proxy blocked the asyncio event loop | **Fixed.** `_authorize` and both tunnel decisions now run via `asyncio.to_thread`. |
+| §3.8 — dead assignment in `cmd_export` | **Fixed.** |
 
 Still open: the four decisions in §7, item 7 (the toy agent), and item 1's
 `AuditEntry` model. §5's scope deletions are untouched pending §7.
