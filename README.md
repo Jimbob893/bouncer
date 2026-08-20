@@ -4,7 +4,7 @@
 
 [![CI](https://github.com/nmaltese13/bouncer/actions/workflows/ci.yml/badge.svg)](https://github.com/nmaltese13/bouncer/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/agent-bouncer)](https://pypi.org/project/agent-bouncer/)
-[![Coverage 88%](https://img.shields.io/badge/coverage-88%25-brightgreen)](#development)
+[![Coverage 89%](https://img.shields.io/badge/coverage-89%25-brightgreen)](#development)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Checked with mypy](https://img.shields.io/badge/mypy-strict-blue)](http://mypy-lang.org/)
