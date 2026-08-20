@@ -381,6 +381,18 @@ def cmd_deny(args: argparse.Namespace, out: TextIO) -> int:
     return _resolve(args, out, approve=False)
 
 
+def cmd_demo(args: argparse.Namespace, out: TextIO) -> int:
+    """Run the bundled demonstration.
+
+    Deliberately independent of the operator's real state: it builds its own
+    key, policy and database in a temporary directory and removes them on the
+    way out, so running it can never touch or spend against ~/.bouncer.
+    """
+    from .demo import main as run_demo
+
+    return int(run_demo())
+
+
 def cmd_serve(args: argparse.Namespace, out: TextIO) -> int:
     import uvicorn
 
@@ -509,6 +521,11 @@ def build_parser() -> argparse.ArgumentParser:
     deny.add_argument("--note")
     deny.add_argument("--json", action="store_true")
     deny.set_defaults(handler=cmd_deny)
+
+    demo = subparsers.add_parser(
+        "demo", help="watch six purchases judged, then the audit chain checked"
+    )
+    demo.set_defaults(handler=cmd_demo)
 
     serve = subparsers.add_parser("serve", help="run the authorization API")
     serve.add_argument("--host", default="127.0.0.1")

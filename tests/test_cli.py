@@ -300,3 +300,36 @@ def test_purge_removes_expired_nonces_only(home: Path) -> None:
     assert "audit log is append-only and was not modified" in output
     assert run(home, "verify")[0] == EXIT_OK
     assert "1 entries verified" in run(home, "verify")[1]
+
+
+# ---------------------------------------------------------------------------
+# `bouncer demo` -- reachable from an installed wheel, and self-contained
+# ---------------------------------------------------------------------------
+
+
+def test_demo_command_runs_and_shows_every_outcome(
+    capsys: pytest.CaptureFixture[str], home: Path
+) -> None:
+    code, _ = run(home, "demo")
+    printed = capsys.readouterr().out
+    assert code == EXIT_OK
+    assert "ALLOW  WITHIN_POLICY" in printed
+    assert "DENY  OVER_PER_TXN_CAP" in printed
+    assert "APPROVAL  APPROVAL_REQUIRED" in printed
+    assert "CHAIN BROKEN" in printed, "the tamper evidence must still fire"
+
+
+def test_demo_command_does_not_touch_the_operator_home(
+    capsys: pytest.CaptureFixture[str], home: Path
+) -> None:
+    """It builds its own throwaway state; a demo must never spend real budget."""
+    bootstrap(home)
+    before = sorted(p.name for p in home.iterdir())
+    audit_rows_before = (home / "bouncer.db").stat().st_size if (home / "bouncer.db").exists() else 0
+
+    run(home, "demo")
+    capsys.readouterr()
+
+    assert sorted(p.name for p in home.iterdir()) == before
+    after = (home / "bouncer.db").stat().st_size if (home / "bouncer.db").exists() else 0
+    assert after == audit_rows_before

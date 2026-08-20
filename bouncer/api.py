@@ -20,6 +20,7 @@ from fastapi import FastAPI, Query, Request, Response
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 
+from . import __version__
 from .adapters import RequestContext, parse_intent
 from .approvals import ApprovalQueue
 from .audit import AuditLog
@@ -102,7 +103,7 @@ def create_app(config: BouncerConfig | None = None, *, enforcer: Enforcer | None
 
     app = FastAPI(
         title="bouncer",
-        version="0.1.0",
+        version=__version__,
         description=(
             "A policy enforcement point for agent spending. Authorizes payment "
             "intents against a declarative policy and returns signed mandates. "

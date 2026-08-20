@@ -109,13 +109,22 @@ From there, edit `~/.bouncer/policy.yaml` to write your own rules, and run
 server up, `http://127.0.0.1:8080/docs` is a full interactive console for
 `POST /authorize` — the quickest way to show someone the enforcement working.
 
-Two runnable examples, both using throwaway state so your real `~/.bouncer` is
-never touched. They ship in the repository rather than the wheel:
+To watch the whole thing work — six purchases judged, an approval routed to a
+human, then the audit chain verified and caught after tampering:
+
+```bash
+bouncer demo
+```
+
+It builds its own key, policy and database in a temporary directory and removes
+them afterwards, so it never touches or spends against your `~/.bouncer`.
+
+A second example, a toy agent that spends through a $50 budget until it is
+stopped, lives in the repository:
 
 ```bash
 git clone https://github.com/nmaltese13/bouncer.git && cd bouncer
-python examples/agent.py   # a toy agent with a $50 budget, spending until it is stopped
-python examples/demo.py    # six purchases, ending with the audit chain caught being tampered with
+python examples/agent.py
 ```
 
 ---
